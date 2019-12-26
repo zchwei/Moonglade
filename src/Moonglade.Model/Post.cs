@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Text;
 
 namespace Moonglade.Model
 {
@@ -9,7 +8,7 @@ namespace Moonglade.Model
         public Guid Id { get; set; }
         public string Title { get; set; }
         public string Slug { get; set; }
-        public string EncodedHtmlContent { get; set; }
+        public string RawPostContent { get; set; }
         public bool CommentEnabled { get; set; }
         public DateTime CreateOnUtc { get; set; }
         public string ContentAbstract { get; set; }

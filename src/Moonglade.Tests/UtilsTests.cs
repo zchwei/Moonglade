@@ -31,14 +31,14 @@ namespace Moonglade.Tests
         public void TestUtcToZoneTime()
         {
             var utc = new DateTime(2000, 1, 1, 0, 0, 0);
-            var dt = Utils.UtcToZoneTime(utc, 8);
+            var dt = Utils.UtcToZoneTime(utc, "08:00:00");
             Assert.IsTrue(dt == DateTime.Parse("2000/1/1 8:00:00"));
         }
 
         [Test]
         public void TestLeft()
         {
-            var str = "Microsoft Rocks!";
+            const string str = "Microsoft Rocks!";
             var left = Utils.Left(str, 9);
             Assert.IsTrue(left == "Microsoft");
         }
@@ -59,10 +59,25 @@ namespace Moonglade.Tests
             return Utils.NormalizeTagName(str);
         }
 
+        [TestCase("C", ExpectedResult = true)]
+        [TestCase("C++", ExpectedResult = true)]
+        [TestCase("C#", ExpectedResult = true)]
+        [TestCase("Java", ExpectedResult = true)]
+        [TestCase("996", ExpectedResult = true)]
+        [TestCase(".NET", ExpectedResult = true)]
+        [TestCase("C Sharp", ExpectedResult = true)]
+        [TestCase("Cup<T>", ExpectedResult = false)]
+        [TestCase("(1)", ExpectedResult = false)]
+        [TestCase("usr/bin", ExpectedResult = false)]
+        public bool TestValidateTagName(string tagDisplayName)
+        {
+            return Utils.ValidateTagName(tagDisplayName);
+        }
+
         [Test]
         public void TryParseBase64Success()
         {
-            bool ok = Utils.TryParseBase64("xDgItVa0ujLKxGsoMV1+MmxBrpo997mXbeXngqIx13o=", out var base64);
+            var ok = Utils.TryParseBase64("xDgItVa0ujLKxGsoMV1+MmxBrpo997mXbeXngqIx13o=", out var base64);
             Assert.IsTrue(ok);
             Assert.IsNotNull(base64);
         }
@@ -70,7 +85,7 @@ namespace Moonglade.Tests
         [Test]
         public void TryParseBase64Fail()
         {
-            bool ok = Utils.TryParseBase64("Learn Java and work 996!", out var base64);
+            var ok = Utils.TryParseBase64("Learn Java and work 996!", out var base64);
             Assert.IsFalse(ok);
             Assert.IsNull(base64);
         }
@@ -78,7 +93,7 @@ namespace Moonglade.Tests
         [Test]
         public void TestReplaceImgSrc()
         {
-            var html = @"<p>Work 996 and have some fu bao!</p><img src=""icu.jpg"" /><video src=""java996.mp4""></video>";
+            const string html = @"<p>Work 996 and have some fu bao!</p><img src=""icu.jpg"" /><video src=""java996.mp4""></video>";
             var result = Utils.ReplaceImgSrc(html);
             Assert.IsTrue(result == @"<p>Work 996 and have some fu bao!</p><img src=""/images/loading.gif"" data-src=""icu.jpg"" /><video src=""java996.mp4""></video>");
         }
@@ -86,8 +101,8 @@ namespace Moonglade.Tests
         [Test]
         public void TestMdContentToHtml()
         {
-            string md = "A quick brown **fox** jumped over the lazy dog.";
-            string result = Utils.MdContentToHtml(md);
+            var md = "A quick brown **fox** jumped over the lazy dog.";
+            var result = Utils.ConvertMarkdownContent(md, Utils.MarkdownConvertType.Html);
 
             Assert.IsTrue(result == "<p>A quick brown <strong>fox</strong> jumped over the lazy dog.</p>\n");
         }
@@ -126,10 +141,7 @@ namespace Moonglade.Tests
                 var contentRootPath = @"C:\Moonglade";
                 var path = @"..\${basedir}\Uploads";
 
-                Assert.Catch<NotSupportedException>(() =>
-                {
-                    var finalPath = Utils.ResolveImageStoragePath(contentRootPath, path);
-                });
+                Assert.Catch<NotSupportedException>(() => { Utils.ResolveImageStoragePath(contentRootPath, path); });
             }
         }
 
@@ -141,10 +153,7 @@ namespace Moonglade.Tests
                 var contentRootPath = @"C:\Moonglade";
                 var path = @"${basedir}\Uploads<>|foo";
 
-                Assert.Catch<InvalidOperationException>(() =>
-                {
-                    var finalPath = Utils.ResolveImageStoragePath(contentRootPath, path);
-                });
+                Assert.Catch<InvalidOperationException>(() => { Utils.ResolveImageStoragePath(contentRootPath, path); });
             }
         }
 
@@ -156,10 +165,7 @@ namespace Moonglade.Tests
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
                 var contentRootPath = @"C:\Moonglade";
-                Assert.Catch<ArgumentNullException>(() =>
-                {
-                    var finalPath = Utils.ResolveImageStoragePath(contentRootPath, path);
-                });
+                Assert.Catch<ArgumentNullException>(() => { Utils.ResolveImageStoragePath(contentRootPath, path); });
             }
         }
 
@@ -170,6 +176,15 @@ namespace Moonglade.Tests
             var output = Utils.RemoveTags(html);
 
             Assert.IsTrue(output == "MicrosoftRocks!Azure  The best cloud!");
+        }
+
+        [Test]
+        public void TestRemoveScriptTagFromHtml()
+        {
+            var html = @"<p>Microsoft</p><p>Rocks!</p><p>Azure <br /><script>console.info('hey');</script><img src=""a.jpg"" /> The best <span>cloud</span>!</p>";
+            var output = Utils.RemoveScriptTagFromHtml(html);
+
+            Assert.IsTrue(output == @"<p>Microsoft</p><p>Rocks!</p><p>Azure <br /><img src=""a.jpg"" /> The best <span>cloud</span>!</p>");
         }
 
         [Test]

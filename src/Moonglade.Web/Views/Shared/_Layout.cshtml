@@ -1,23 +1,19 @@
 ﻿@inject Microsoft.ApplicationInsights.AspNetCore.JavaScriptSnippet JavaScriptSnippet
-@using Microsoft.Extensions.Options
-@using Moonglade.Configuration.Abstraction
-@using Moonglade.Model.Settings
-@{
-    string currentController = ViewContext.RouteData?.Values["controller"]?.ToString();
-    string currentAction = ViewContext.RouteData?.Values["action"]?.ToString();
-    string customPageRouteName = ViewContext.RouteData?.Values["routeName"]?.ToString();
-}
 @inject Microsoft.AspNetCore.Http.IHttpContextAccessor HttpContextAccessor
-@inject IOptions<AppSettings> Settings
-@inject IBlogConfig BlogConfig
+@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment WebHostEnvironment
+@{
+    var currentController = ViewContext.RouteData?.Values["controller"]?.ToString();
+    var currentAction = ViewContext.RouteData?.Values["action"]?.ToString();
+    var customPageRouteName = ViewContext.RouteData?.Values["routeName"]?.ToString();
+}
 
 <!DOCTYPE html>
 <html>
 <head>
     <title>
         @(ViewBag?.TitlePrefix)@(null == ViewBag?.TitlePrefix ? string.Empty : " - ")@BlogConfig.GeneralSettings.SiteTitle
-        <environment include="Development">
-            (Debug)
+        <environment exclude="Production">
+            (@WebHostEnvironment.EnvironmentName)
         </environment>
     </title>
     <meta charset="utf-8" />
@@ -31,10 +27,18 @@
         <meta name="keywords" content="@Html.Raw(BlogConfig.GeneralSettings.MetaKeyword)" />
     }
     @RenderSection("meta", false)
-
-    @if (!string.IsNullOrWhiteSpace(Settings.Value.DNSPrefetchEndpoint))
+    @if (IsSectionDefined("metadescription"))
     {
-        <link rel="dns-prefetch" href="@Settings.Value.DNSPrefetchEndpoint" />
+        @RenderSection("metadescription", false)
+    }
+    else
+    {
+        <meta name="description" content="@BlogConfig.GeneralSettings.MetaDescription" />
+    }
+
+    @if (!string.IsNullOrWhiteSpace(BlogConfig.AdvancedSettings.DNSPrefetchEndpoint))
+    {
+        <link rel="dns-prefetch" href="@BlogConfig.AdvancedSettings.DNSPrefetchEndpoint" />
     }
     <link rel="start" title="@BlogConfig.GeneralSettings.SiteTitle" href="~/" />
     <link rel="alternate" type="application/rss+xml" title="@BlogConfig.FeedSettings.RssTitle" href="~/rss" />
@@ -43,13 +47,14 @@
     <link href="~/css/mooglade-css-bundle.min.css" rel="stylesheet" asp-append-version="true" />
     <script src="~/js/app/app-js-bundle.min.js" asp-append-version="true"></script>
     @RenderSection("head", false)
-    <environment exclude="Development">
+    <environment include="Production">
         @Html.Raw(JavaScriptSnippet.FullScript)
     </environment>
+    <link href="~/css/theme/@BlogConfig.GeneralSettings.ThemeFileName" rel="stylesheet" asp-append-version="true" />
 </head>
 <body>
     <header class="ediblog-header">
-        <nav class="navbar fixed-top navbar-expand-lg navbar-dark bg-moonglade-blue">
+        <nav id="moonglade-nav" class="navbar fixed-top navbar-expand-lg navbar-dark bg-moonglade-accent1">
             <div class="container">
                 <div class="animbrand">
                     <a class="moonglade-logo navbar-brand animate" href="/">
@@ -63,7 +68,7 @@
                     <ul class="navbar-nav mr-auto">
                         <li id="navbar-dropdown-post" class="nav-item @("Category" == currentController ? "dropdown active" : "dropdown")">
                             <a href="#" class="nav-link dropdown-toggle" role="button" data-toggle="dropdown">
-                                <i class="fas fa-book"></i>
+                                <span class="icon-book"></span>
                                 <strong>Categories</strong>
                             </a>
                             <cache expires-after="@TimeSpan.FromMinutes(60)">
@@ -73,27 +78,27 @@
 
                         <li class="nav-item @(string.Compare("Tags", currentController, StringComparison.OrdinalIgnoreCase) == 0 ? "active" : null)">
                             <a asp-controller="Tags" asp-action="Index" class="nav-link">
-                                <i class="fas fa-tags"></i>
+                                <span class="icon-price-tag"></span>
                                 <strong>Tags</strong>
                             </a>
                         </li>
 
                         <li class="nav-item @(string.Compare("Archive", currentController, StringComparison.OrdinalIgnoreCase) == 0 ? "active" : null)">
                             <a asp-controller="Archive" asp-action="Index" class="nav-link">
-                                <i class="fas fa-archive"></i>
+                                <span class="icon-folder"></span>
                                 <strong>Archive</strong>
                             </a>
                         </li>
                         <li class="nav-item @(string.Compare("about", customPageRouteName, StringComparison.OrdinalIgnoreCase) == 0 ? "active" : null)">
                             <a asp-controller="CustomPage" asp-action="Index" asp-route-routeName="about" class="nav-link">
-                                <i class="fas fa-star"></i>
+                                <span class="icon-star-full"></span>
                                 <strong>About</strong>
                             </a>
                         </li>
                     </ul>
                     <form class="form-inline search-form my-2 my-lg-0" asp-controller="Search" asp-action="Index">
                         <input id="term"
-                               class="form-control mr-sm-2"
+                               class="form-control bg-transparent mr-sm-2"
                                type="search"
                                value=""
                                title="Search"
@@ -101,13 +106,20 @@
                                placeholder="Search"
                                name="term"
                                maxlength="30">
-                        <button class="btn btn-outline-light btn-search my-2 my-sm-0 d-none d-md-block" type="submit"><i class="fas fa-search"></i></button>
-                        <button class="btn btn-block btn-success d-block d-sm-none mt-1" type="submit"><i class="fas fa-search"></i> Search</button>
+                        <button class="btn btn-outline-light btn-search my-2 my-sm-0 d-none d-md-block" type="submit"><span class="icon-search"></span></button>
+                        <button class="btn btn-block btn-success d-block d-sm-none mt-1" type="submit"><span class="icon-search"></span> Search</button>
                     </form>
                 </div>
             </div>
         </nav>
     </header>
+
+    @if (BlogConfig.ContentSettings.ShowCalloutSection)
+    {
+        <section class="call-out">
+            @Html.Raw(BlogConfig.ContentSettings.CalloutSectionHtmlPitch)
+        </section>
+    }
 
     <div id="page-content" class="content">
         @if (null != ViewBag.ShowBloggerIntroInXS && ViewBag.ShowBloggerIntroInXS)

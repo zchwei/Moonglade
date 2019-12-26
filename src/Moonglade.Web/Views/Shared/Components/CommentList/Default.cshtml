@@ -1,15 +1,9 @@
-﻿@using Microsoft.Extensions.Options
-@using Moonglade.Core
-@using Moonglade.Model.Settings
-@using Moonglade.Configuration.Abstraction
+﻿@using Moonglade.Core
 @using Moonglade.Web.HtmlHelpers
 @model IReadOnlyList<Moonglade.Model.PostCommentListItem>
 
-@inject IOptions<AppSettings> Settings
-@inject IBlogConfig BlogConfig
-
 @{
-    string GetUserAvatarChar(string username)
+    static string GetUserAvatarChar(string username)
     {
         if (string.IsNullOrWhiteSpace(username))
         {
@@ -34,7 +28,7 @@
                 @if (BlogConfig.ContentSettings.EnableGravatar)
                 {
                     <div class="user-avatar">
-                        @Html.GravatarImage(item.Email, size: 58, forceSecureRequest: true)
+                        @Html.GravatarImage(item.Email, 58, forceSecureRequest: true)
                     </div>
                 }
                 else
@@ -48,10 +42,10 @@
                 <div class="card comment-item">
                     <div class="card-header">
                         <strong>@item.Username</strong>
-                        <span class="text-muted float-right"> @Utils.UtcToZoneTime(item.CreateOnUtc, Settings.Value.TimeZone).ToString("yyyy-M-d HH:mm")</span>
+                        <span class="text-muted float-right"> @Utils.UtcToZoneTime(item.CreateOnUtc, BlogConfig.GeneralSettings.TimeZoneUtcOffset).ToString("yyyy-M-d HH:mm")</span>
                     </div>
                     <div class="card-body">
-                        @Html.Raw(Utils.MdContentToHtml(item.CommentContent))
+                        @Html.Raw(Utils.ConvertMarkdownContent(item.CommentContent, Utils.MarkdownConvertType.Html))
                         <div>
                             @foreach (var reply in item.CommentReplies.OrderByDescending(t => t.ReplyTimeUtc))
                             {
@@ -61,7 +55,7 @@
                                         <strong>
                                             Blog Author Replied:
                                         </strong>
-                                        <span class="float-right text-muted">Replied at @Utils.UtcToZoneTime(reply.ReplyTimeUtc, Settings.Value.TimeZone).ToString("yyyy-M-d HH:mm")</span>
+                                        <span class="float-right text-muted">Replied at @Utils.UtcToZoneTime(reply.ReplyTimeUtc, BlogConfig.GeneralSettings.TimeZoneUtcOffset).ToString("yyyy-M-d HH:mm")</span>
                                     </div>
                                     <p>
                                         @reply.ReplyContent

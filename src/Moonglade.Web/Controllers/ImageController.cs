@@ -15,7 +15,6 @@ using Moonglade.Configuration.Abstraction;
 using Moonglade.Model;
 using Moonglade.ImageStorage;
 using Moonglade.Model.Settings;
-using Newtonsoft.Json;
 using Moonglade.Core;
 
 namespace Moonglade.Web.Controllers
@@ -41,13 +40,35 @@ namespace Moonglade.Web.Controllers
             _cdnSettings = imageStorageSettings.Value?.CDNSettings;
         }
 
-        [Route("uploads/{filename}")]
+        [ResponseCache(Duration = 3600)]
+        [Route(@"/{filename:regex((?!-)([[a-z0-9-]]+)\.(png|ico))}")]
+        public IActionResult Favicon(string filename)
+        {
+            var faviconDirectory = $@"{AppDomain.CurrentDomain.GetData(Constants.DataDirectory)}\favicons";
+            var iconPath = Path.Combine(faviconDirectory, filename.ToLower());
+            if (System.IO.File.Exists(iconPath))
+            {
+                var contentType = "image/png";
+                var ext = Path.GetExtension(filename);
+                contentType = ext switch
+                {
+                    ".png" => "image/png",
+                    ".ico" => "image/x-icon",
+                    _ => contentType
+                };
+                return PhysicalFile(iconPath, contentType);
+            }
+
+            return NotFound();
+        }
+
+        [Route(@"uploads/{filename:regex((?!-)([[a-z0-9-]]+)\.(png|jpg|jpeg|gif|bmp))}")]
         public async Task<IActionResult> GetImageAsync(string filename, [FromServices] IMemoryCache cache)
         {
             try
             {
                 var invalidChars = Path.GetInvalidFileNameChars();
-                if (filename.IndexOfAny(invalidChars) > 0)
+                if (filename.IndexOfAny(invalidChars) >= 0)
                 {
                     Logger.LogWarning($"Invalid filename attempt '{filename}'.");
                     return BadRequest("invalid filename");
@@ -100,69 +121,63 @@ namespace Moonglade.Web.Controllers
                     return BadRequest();
                 }
 
-                if (file.Length > 0)
+                if (file.Length <= 0) return BadRequest();
+
+                var name = Path.GetFileName(file.FileName);
+                if (name == null) return BadRequest();
+
+                var ext = Path.GetExtension(name).ToLower();
+                var allowedImageFormats = new[] { ".png", ".jpg", ".jpeg", ".bmp", ".gif" };
+                if (!allowedImageFormats.Contains(ext))
                 {
-                    var name = Path.GetFileName(file.FileName);
-                    if (name == null) return BadRequest();
-
-                    var ext = Path.GetExtension(name).ToLower();
-                    var allowedImageFormats = new[] { ".png", ".jpg", ".jpeg", ".bmp", ".gif" };
-                    if (!allowedImageFormats.Contains(ext))
-                    {
-                        Logger.LogError($"Invalid file extension: {ext}");
-                        return BadRequest();
-                    }
-
-                    var primaryFileName = fileNameGenerator.GetFileName(name);
-                    var secondaryFieName = fileNameGenerator.GetFileName(name, "origin");
-
-                    using (var stream = new MemoryStream())
-                    {
-                        await file.CopyToAsync(stream);
-
-                        // Add watermark
-                        MemoryStream watermarkedStream = null;
-                        if (_blogConfig.WatermarkSettings.IsEnabled && ext != ".gif")
-                        {
-                            using (var watermarker = new ImageWatermarker(stream, ext)
-                            {
-                                SkipWatermarkForSmallImages = true,
-                                SmallImagePixelsThreshold = Constants.SmallImagePixelsThreshold
-                            })
-                            {
-                                Logger.LogInformation($"Adding watermark onto image {primaryFileName}");
-
-                                watermarkedStream = watermarker.AddWatermark(
-                                    _blogConfig.WatermarkSettings.WatermarkText,
-                                    Color.FromArgb(128, 128, 128, 128),
-                                    WatermarkPosition.BottomRight,
-                                    15,
-                                    _blogConfig.WatermarkSettings.FontSize);
-                            }
-                        }
-
-                        var response = await _imageStorageProvider.InsertAsync(primaryFileName,
-                            watermarkedStream != null ?
-                                watermarkedStream.ToArray() :
-                                stream.ToArray());
-
-                        if (_blogConfig.WatermarkSettings.KeepOriginImage)
-                        {
-                            var arr = stream.ToArray();
-                            _ = Task.Run(async () => await _imageStorageProvider.InsertAsync(secondaryFieName, arr));
-                        }
-
-                        Logger.LogInformation("Image Uploaded: " + JsonConvert.SerializeObject(response));
-
-                        if (response.IsSuccess)
-                        {
-                            return Json(new { location = $"/uploads/{response.Item}" });
-                        }
-                        Logger.LogError(response.Message);
-                        return ServerError();
-                    }
+                    Logger.LogError($"Invalid file extension: {ext}");
+                    return BadRequest();
                 }
-                return BadRequest();
+
+                var primaryFileName = fileNameGenerator.GetFileName(name);
+                var secondaryFieName = fileNameGenerator.GetFileName(name, "origin");
+
+                await using var stream = new MemoryStream();
+                await file.CopyToAsync(stream);
+
+                // Add watermark
+                MemoryStream watermarkedStream = null;
+                if (_blogConfig.WatermarkSettings.IsEnabled && ext != ".gif")
+                {
+                    using var watermarker = new ImageWatermarker(stream, ext)
+                    {
+                        SkipWatermarkForSmallImages = true,
+                        SmallImagePixelsThreshold = Constants.SmallImagePixelsThreshold
+                    };
+                    Logger.LogInformation($"Adding watermark onto image '{primaryFileName}'");
+
+                    watermarkedStream = watermarker.AddWatermark(
+                        _blogConfig.WatermarkSettings.WatermarkText,
+                        Color.FromArgb(128, 128, 128, 128),
+                        WatermarkPosition.BottomRight,
+                        15,
+                        _blogConfig.WatermarkSettings.FontSize);
+                }
+
+                var response = await _imageStorageProvider.InsertAsync(primaryFileName,
+                    watermarkedStream != null ?
+                        watermarkedStream.ToArray() :
+                        stream.ToArray());
+
+                if (_blogConfig.WatermarkSettings.KeepOriginImage)
+                {
+                    var arr = stream.ToArray();
+                    _ = Task.Run(async () => await _imageStorageProvider.InsertAsync(secondaryFieName, arr));
+                }
+
+                Logger.LogInformation($"Image '{primaryFileName}' uloaded.");
+
+                if (response.IsSuccess)
+                {
+                    return Json(new { location = $"/uploads/{response.Item}" });
+                }
+                Logger.LogError(response.Message);
+                return ServerError();
             }
             catch (Exception e)
             {
@@ -204,6 +219,11 @@ namespace Moonglade.Web.Controllers
             {
                 Logger.LogError($"Error {nameof(Avatar)}(), Invalid Base64 string", e);
                 return PhysicalFile(fallbackImageFile, "image/png");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error {nameof(Avatar)}()", ex);
+                return new EmptyResult();
             }
         }
     }

@@ -11,10 +11,10 @@ namespace Moonglade.Configuration.Abstraction
         EmailSettings EmailSettings { get; set; }
         FeedSettings FeedSettings { get; set; }
         WatermarkSettings WatermarkSettings { get; set; }
+        FriendLinksSettings FriendLinksSettings { get; set; }
+        AdvancedSettings AdvancedSettings { get; set; }
 
-        Task<Response> SaveConfigurationAsync<T>(T moongladeSettings) where T : IMoongladeSettings;
-
-        string EncryptPassword(string clearPassword);
+        Task<Response> SaveConfigurationAsync<T>(T moongladeSettings) where T : MoongladeSettings;
 
         void RequireRefresh();
     }

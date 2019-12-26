@@ -7,7 +7,6 @@ using AspNetCoreRateLimit;
 using Edi.Blog.OpmlFileWriter;
 using Edi.Blog.Pingback;
 using Edi.Captcha;
-using Edi.Net.AesEncryption;
 using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.ApplicationInsights.Extensibility.Implementation;
 using Microsoft.AspNetCore.Builder;
@@ -20,63 +19,59 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moonglade.Configuration;
 using Moonglade.Configuration.Abstraction;
 using Moonglade.Core;
+using Moonglade.Core.Notification;
 using Moonglade.Data;
 using Moonglade.Data.Infrastructure;
 using Moonglade.HtmlCodec;
 using Moonglade.ImageStorage;
-using Moonglade.ImageStorage.AzureBlob;
-using Moonglade.ImageStorage.FileSystem;
 using Moonglade.Model;
 using Moonglade.Model.Settings;
-using Moonglade.Notification;
 using Moonglade.Setup;
 using Moonglade.Web.Authentication;
+using Moonglade.Web.Extensions;
+using Moonglade.Web.FaviconGenerator;
 using Moonglade.Web.Filters;
 using Moonglade.Web.Middleware.PoweredBy;
 using Moonglade.Web.Middleware.RobotsTxt;
-using Newtonsoft.Json;
+using Polly;
 
 namespace Moonglade.Web
 {
     public class Startup
     {
-        private IServiceCollection _services;
-
-        private readonly ILogger<Startup> _logger;
+        private ILogger<Startup> _logger;
         private readonly IConfigurationSection _appSettingsSection;
+        private readonly IConfiguration _configuration;
+        private readonly IWebHostEnvironment _environment;
 
-        public IConfiguration Configuration { get; }
-
-        public IHostingEnvironment Environment { get; }
-
-        public Startup(IConfiguration configuration, ILogger<Startup> logger, IHostingEnvironment env)
+        public Startup(IConfiguration configuration, IWebHostEnvironment env)
         {
-            Configuration = configuration;
-            Environment = env;
-            _logger = logger;
-
-            _appSettingsSection = Configuration.GetSection(nameof(AppSettings));
+            _configuration = configuration;
+            _environment = env;
+            _appSettingsSection = _configuration.GetSection(nameof(AppSettings));
         }
 
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddOptions();
             services.AddMemoryCache();
+            services.AddRateLimit(_configuration.GetSection("IpRateLimiting"));
 
-            // Setup document: https://github.com/stefanprodan/AspNetCoreRateLimit/wiki/IpRateLimitMiddleware#setup
-            //load general configuration from appsettings.json
-            services.Configure<IpRateLimitOptions>(Configuration.GetSection("IpRateLimiting"));
+            services.Configure<AppSettings>(_appSettingsSection);
+            services.Configure<RobotsTxtOptions>(_configuration.GetSection("RobotsTxt"));
 
-            //load ip rules from appsettings.json
-            // services.Configure<IpRateLimitPolicies>(Configuration.GetSection("IpRateLimitPolicies"));
+            var authentication = new AuthenticationSettings();
+            _configuration.Bind(nameof(Authentication), authentication);
+            services.Configure<AuthenticationSettings>(_configuration.GetSection(nameof(Authentication)));
 
-            // inject counter and rules stores
-            services.AddSingleton<IIpPolicyStore, MemoryCacheIpPolicyStore>();
-            services.AddSingleton<IRateLimitCounterStore, MemoryCacheRateLimitCounterStore>();
+            var imageStorage = new ImageStorageSettings();
+            _configuration.Bind(nameof(ImageStorage), imageStorage);
+            services.Configure<ImageStorageSettings>(_configuration.GetSection(nameof(ImageStorage)));
 
             services.AddSession(options =>
             {
@@ -84,28 +79,10 @@ namespace Moonglade.Web
                 options.Cookie.HttpOnly = true;
             });
 
-            services.Configure<AppSettings>(_appSettingsSection);
-            services.Configure<RobotsTxtOptions>(Configuration.GetSection("RobotsTxt"));
-
-            var authentication = new AuthenticationSettings();
-            Configuration.Bind(nameof(Authentication), authentication);
+            services.AddApplicationInsightsTelemetry();
             services.AddMoongladeAuthenticaton(authentication);
-
             services.AddMvc(options =>
-                            options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute()))
-                    .SetCompatibilityVersion(CompatibilityVersion.Version_2_2)
-                    .AddJsonOptions(options =>
-                                    options.SerializerSettings.ReferenceLoopHandling = ReferenceLoopHandling.Ignore
-                    );
-
-            // https://github.com/aspnet/Hosting/issues/793
-            // the IHttpContextAccessor service is not registered by default.
-            // the clientId/clientIp resolvers use it.
-            // services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
-            services.AddHttpContextAccessor();
-
-            // configuration (resolvers, counter key builders)
-            services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>();
+                            options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute()));
 
             services.AddAntiforgery(options =>
             {
@@ -114,19 +91,17 @@ namespace Moonglade.Web
                 options.FormFieldName = $"{cookieBaseName}-FORM";
             });
 
-            AddImageStorage(services);
-
+            services.AddMoongladeImageStorage(imageStorage, _environment.ContentRootPath);
             services.AddScoped(typeof(IRepository<>), typeof(DbContextRepository<>));
             services.TryAddSingleton<IActionContextAccessor, ActionContextAccessor>();
             services.AddSingleton<IBlogConfig, BlogConfig>();
             services.AddScoped<DeleteSubscriptionCache>();
-            services.AddTransient<IHtmlCodec, HttpUtilityHtmlCodec>();
-            services.AddTransient<ISessionBasedCaptcha, BasicLetterCaptcha>();
-            services.AddTransient<IMoongladeNotification, EmailNotification>();
-            services.AddTransient<IPingbackSender, PingbackSender>();
-            services.AddTransient<IPingbackReceiver, PingbackReceiver>();
-            services.AddTransient<IFileSystemOpmlWriter, FileSystemOpmlWriter>();
-            services.AddTransient<IFileNameGenerator>(gen => new GuidFileNameGenerator(Guid.NewGuid()));
+            services.AddScoped<IHtmlCodec, MoongladeHtmlCodec>();
+            services.AddScoped<IPingbackSender, PingbackSender>();
+            services.AddScoped<IPingbackReceiver, PingbackReceiver>();
+            services.AddScoped<IFileSystemOpmlWriter, FileSystemOpmlWriter>();
+            services.AddScoped<IFileNameGenerator>(gen => new GuidFileNameGenerator(Guid.NewGuid()));
+            services.AddSessionBasedCaptcha();
 
             var asm = Assembly.GetAssembly(typeof(MoongladeService));
             if (null != asm)
@@ -134,30 +109,41 @@ namespace Moonglade.Web
                 var types = asm.GetTypes().Where(t => t.IsClass && t.IsPublic && t.Name.EndsWith("Service"));
                 foreach (var t in types)
                 {
-                    services.AddTransient(t, t);
+                    services.AddScoped(t, t);
                 }
             }
 
-            var encryption = new Encryption();
-            Configuration.Bind(nameof(Encryption), encryption);
-            services.AddTransient<IAesEncryptionService>(enc => new AesEncryptionService(new KeyInfo(encryption.Key, encryption.IV)));
+            if (bool.Parse(_appSettingsSection["Notification:Enabled"]))
+            {
+                services.AddHttpClient<IMoongladeNotificationClient, NotificationClient>()
+                        .AddTransientHttpErrorPolicy(builder =>
+                                builder.WaitAndRetryAsync(3, retryCount =>
+                                TimeSpan.FromSeconds(Math.Pow(2, retryCount)),
+                                    (result, span, retryCount, context) =>
+                                    {
+                                        _logger?.LogWarning($"Request failed with {result.Result.StatusCode}. Waiting {span} before next retry. Retry attempt {retryCount}/3.");
+                                    }));
+            }
 
             services.AddDbContext<MoongladeDbContext>(options =>
                     options.UseLazyLoadingProxies()
-                           .UseSqlServer(Configuration.GetConnectionString(Constants.DbConnectionName), sqlOptions =>
+                           .UseSqlServer(_configuration.GetConnectionString(Constants.DbConnectionName), sqlOptions =>
                                {
                                    sqlOptions.EnableRetryOnFailure(
-                                       maxRetryCount: 3,
-                                       maxRetryDelay: TimeSpan.FromSeconds(30),
-                                       errorNumbersToAdd: null);
+                                       3,
+                                       TimeSpan.FromSeconds(30),
+                                       null);
                                }));
-
-            _services = services;
         }
 
-        // ReSharper disable once UnusedMember.Global
-        public void Configure(IApplicationBuilder app, IHostingEnvironment env, IApplicationLifetime appLifetime)
+        public void Configure(
+            IApplicationBuilder app,
+            ILogger<Startup> logger,
+            IHostApplicationLifetime appLifetime,
+            TelemetryConfiguration configuration)
         {
+            _logger = logger;
+
             appLifetime.ApplicationStarted.Register(() =>
             {
                 _logger.LogInformation("Moonglade started.");
@@ -171,7 +157,9 @@ namespace Moonglade.Web
                 _logger.LogInformation("Moonglade stopped.");
             });
 
-            PrepareRuntimePathDependencies(app, env);
+            PrepareRuntimePathDependencies(app, _environment);
+            GenerateFavicons(_environment);
+
             var enforceHttps = bool.Parse(_appSettingsSection["EnforceHttps"]);
 
             app.UseSecurityHeaders(new HeaderPolicyCollection()
@@ -207,16 +195,18 @@ namespace Moonglade.Web
             );
             app.UseMiddleware<PoweredByMiddleware>();
 
-            if (env.IsDevelopment())
+            if (!_environment.IsProduction())
             {
-                _logger.LogWarning("Application is running under DEBUG mode. Application Insights disabled.");
+                _logger.LogWarning($"Running in environment: {_environment.EnvironmentName}. Application Insights disabled.");
 
-                TelemetryConfiguration.Active.DisableTelemetry = true;
+                configuration.DisableTelemetry = true;
                 TelemetryDebugWriter.IsTracingDisabled = true;
-                ListAllRegisteredServices(app);
+            }
 
+            if (_environment.IsDevelopment())
+            {
+                _logger.LogWarning($"Running in environment: {_environment.EnvironmentName}. Detailed error page enabled.");
                 app.UseDeveloperExceptionPage();
-                app.UseDatabaseErrorPage();
             }
             else
             {
@@ -237,7 +227,6 @@ namespace Moonglade.Web
             app.UseStaticFiles();
             app.UseSession();
 
-            // robots.txt
             app.UseRobotsTxt();
             //app.UseRobotsTxt(builder =>
             //builder.AddSection(section =>
@@ -247,11 +236,7 @@ namespace Moonglade.Web
             ////.AddSitemap("https://example.com/sitemap.xml")
             //);
 
-            app.UseAuthentication();
-
-            GenerateFavicons(env);
-
-            var conn = Configuration.GetConnectionString(Constants.DbConnectionName);
+            var conn = _configuration.GetConnectionString(Constants.DbConnectionName);
             var setupHelper = new SetupHelper(conn);
 
             if (!setupHelper.TestDatabaseConnection(exception =>
@@ -262,7 +247,8 @@ namespace Moonglade.Web
                 app.Run(async context =>
                 {
                     context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                    await context.Response.WriteAsync("Database connection failed. Please see error log, fix it and RESTART this application.");
+                    await context.Response.WriteAsync("Database connection failed. Please see error log. Application has been stopped.");
+                    appLifetime.StopApplication();
                 });
             }
             else
@@ -271,10 +257,9 @@ namespace Moonglade.Web
                 {
                     try
                     {
-                        SetupHelper.SetInitialEncryptionKey(Environment, _logger);
-                        setupHelper.SetupDatabase();
-                        setupHelper.ResetDefaultConfiguration();
-                        setupHelper.InitSampleData();
+                        _logger.LogInformation("Initializing first run configuration...");
+                        setupHelper.InitFirstRun();
+                        _logger.LogInformation("Database setup successfully.");
                     }
                     catch (Exception e)
                     {
@@ -283,41 +268,46 @@ namespace Moonglade.Web
                         {
                             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
                             await context.Response.WriteAsync("Error initializing first run, please check error log.");
+                            appLifetime.StopApplication();
                         });
                     }
                 }
-
 
                 app.UseIpRateLimiting();
                 app.MapWhen(context => context.Request.Path == "/version", builder =>
                 {
                     builder.Run(async context =>
                     {
-                        await context.Response.WriteAsync("Moonglade Version: " + Utils.AppVersion, Encoding.UTF8);
+                        await context.Response.WriteAsync($"Moonglade Version: {Utils.AppVersion}, .NET Core {Environment.Version}", Encoding.UTF8);
                     });
                 });
-                app.UseMvc(routes =>
+
+                app.UseRouting();
+                app.UseAuthentication();
+                app.UseAuthorization();
+
+                app.UseEndpoints(endpoints =>
                 {
-                    routes.MapRoute(
-                        name: "default",
-                        template: "{controller=Post}/{action=Index}/{id?}");
+                    endpoints.MapControllerRoute(
+                        "default",
+                        "{controller=Home}/{action=Index}/{id?}");
+                    endpoints.MapRazorPages();
                 });
             }
         }
 
         #region Private Helpers
 
-        private void GenerateFavicons(IHostingEnvironment env)
+        private void GenerateFavicons(IHostEnvironment env)
         {
-            // Generate Favicons
-            // Caveat: This requires non-readonly application directory for hosting environment
             try
             {
-                IFaviconGenerator faviconGenerator = new MoongladeFaviconGenerator();
+                IFaviconGenerator faviconGenerator = new FileSystemFaviconGenerator();
                 var userDefinedIconFile = Path.Combine(env.ContentRootPath, @"wwwroot\appicon.png");
                 if (File.Exists(userDefinedIconFile))
                 {
-                    faviconGenerator.GenerateIcons(userDefinedIconFile, Path.Combine(env.ContentRootPath, "wwwroot"));
+                    faviconGenerator.GenerateIcons(userDefinedIconFile,
+                        Path.Combine(AppDomain.CurrentDomain.GetData(Constants.DataDirectory).ToString(), "favicons"));
                 }
             }
             catch (Exception e)
@@ -326,79 +316,7 @@ namespace Moonglade.Web
             }
         }
 
-        private void AddImageStorage(IServiceCollection services)
-        {
-            var imageStorage = new ImageStorageSettings();
-            Configuration.Bind(nameof(ImageStorage), imageStorage);
-            services.Configure<ImageStorageSettings>(Configuration.GetSection(nameof(ImageStorage)));
-
-            if (imageStorage.CDNSettings.GetImageByCDNRedirect)
-            {
-                if (string.IsNullOrWhiteSpace(imageStorage.CDNSettings.CDNEndpoint))
-                {
-                    throw new ArgumentNullException(nameof(imageStorage.CDNSettings.CDNEndpoint),
-                        $"{nameof(imageStorage.CDNSettings.CDNEndpoint)} must be specified when {nameof(imageStorage.CDNSettings.GetImageByCDNRedirect)} is set to 'true'.");
-                }
-
-                _logger.LogWarning("Images are configured to use CDN, the endpoint is out of control, use it on your own risk.");
-
-                // Validate endpoint Url to avoid security risks
-                // But it still has risks:
-                // e.g. If the endpoint is compromised, the attacker could return any kind of response from a image with a big fuck to a script that can attack users.
-
-                var endpoint = imageStorage.CDNSettings.CDNEndpoint;
-                var isValidEndpoint = endpoint.IsValidUrl(Utils.UrlScheme.Https);
-                if (!isValidEndpoint)
-                {
-                    throw new UriFormatException("CDN Endpoint is not a valid HTTPS Url.");
-                }
-            }
-
-            if (null == imageStorage.Provider)
-            {
-                throw new ArgumentNullException("Provider", "Provider can not be null.");
-            }
-
-            var imageStorageProvider = imageStorage.Provider.ToLower();
-            if (string.IsNullOrWhiteSpace(imageStorageProvider))
-            {
-                throw new ArgumentNullException("Provider", "Provider can not be empty.");
-            }
-
-            switch (imageStorageProvider)
-            {
-                case "azurestorage":
-                    var conn = imageStorage.AzureStorageSettings.ConnectionString;
-                    var container = imageStorage.AzureStorageSettings.ContainerName;
-
-                    services.AddSingleton(s => new AzureStorageInfo(conn, container));
-                    services.AddSingleton<IAsyncImageStorageProvider, AzureStorageImageProvider>();
-                    break;
-                case "filesystem":
-                    var path = imageStorage.FileSystemSettings.Path;
-                    try
-                    {
-                        var fullPath = Utils.ResolveImageStoragePath(Environment.ContentRootPath, path);
-
-                        _logger.LogInformation($"Setting {nameof(FileSystemImageProvider)} to use Path: {fullPath}");
-                        services.AddSingleton(s => new FileSystemImageProviderInfo(fullPath));
-                        services.AddSingleton<IAsyncImageStorageProvider, FileSystemImageProvider>();
-                    }
-                    catch (Exception e)
-                    {
-                        _logger.LogCritical(e, $"Error setting path for {nameof(FileSystemImageProvider)}, raw path: {path}");
-                        throw;
-                    }
-
-                    break;
-                default:
-                    var msg = $"Provider {imageStorageProvider} is not supported.";
-                    _logger.LogCritical(msg);
-                    throw new NotSupportedException(msg);
-            }
-        }
-
-        private void PrepareRuntimePathDependencies(IApplicationBuilder app, IHostingEnvironment env)
+        private void PrepareRuntimePathDependencies(IApplicationBuilder app, IHostEnvironment env)
         {
             void DeleteDataFile(string path)
             {
@@ -425,15 +343,15 @@ namespace Moonglade.Web
             }
 
             var baseDir = env.ContentRootPath;
-            TryAddUrlRewrite(app, baseDir);
+            TryUseUrlRewrite(app, baseDir);
             AppDomain.CurrentDomain.SetData(Constants.AppBaseDirectory, baseDir);
 
             // Use Temp folder as best practice
             // Do NOT create or modify anything under application directory
             // e.g. Azure Deployment using WEBSITE_RUN_FROM_PACKAGE will make website root directory read only.
-            string tPath = Path.GetTempPath();
+            var tPath = Path.GetTempPath();
             _logger.LogInformation($"Server environment Temp path: {tPath}");
-            string moongladeAppDataPath = Path.Combine(tPath, @"moonglade\App_Data");
+            var moongladeAppDataPath = Path.Combine(tPath, @"moonglade\App_Data");
             if (Directory.Exists(moongladeAppDataPath))
             {
                 Directory.Delete(moongladeAppDataPath, true);
@@ -453,21 +371,22 @@ namespace Moonglade.Web
             CleanDataCache();
         }
 
-        private void TryAddUrlRewrite(IApplicationBuilder app, string baseDir)
+        private void TryUseUrlRewrite(IApplicationBuilder app, string baseDir)
         {
             try
             {
+                var loadExternalRewriteConfig = bool.Parse(_appSettingsSection["EnableImageHotLinkProtection"]);
                 var urlRewriteConfigPath = Path.Combine(baseDir, "urlrewrite.xml");
-                if (File.Exists(urlRewriteConfigPath))
+                
+                if (loadExternalRewriteConfig && File.Exists(urlRewriteConfigPath))
                 {
-                    using (var sr = File.OpenText(urlRewriteConfigPath))
-                    {
-                        var options = new RewriteOptions()
-                            .AddRedirect("(.*)/$", "$1")
-                            .AddRedirect("(index|default).(aspx?|htm|s?html|php|pl|jsp|cfm)", "/")
-                            .AddIISUrlRewrite(sr);
-                        app.UseRewriter(options);
-                    }
+                    using var sr = File.OpenText(urlRewriteConfigPath);
+                    var options = new RewriteOptions()
+                                    .AddRedirect("(.*)/$", "$1")
+                                    .AddRedirect("(index|default).(aspx?|htm|s?html|php|pl|jsp|cfm)", "/")
+                                    .AddRedirect("^favicon/(.*).png$", "/$1.png")
+                                    .AddIISUrlRewrite(sr);
+                    app.UseRewriter(options);
                 }
                 else
                 {
@@ -476,38 +395,10 @@ namespace Moonglade.Web
             }
             catch (Exception e)
             {
-                // URL Rewrite is non-fatal error, continue running the application.
-                _logger.LogError(e, nameof(TryAddUrlRewrite));
+                _logger.LogError(e, nameof(TryUseUrlRewrite));
             }
         }
 
-        private void ListAllRegisteredServices(IApplicationBuilder app)
-        {
-            app.Map("/debug/allservices", builder => builder.Run(async context =>
-            {
-                var sb = new StringBuilder();
-                sb.Append("<html>" +
-                          "<head>" +
-                          "<title>All Registered Services</title>" +
-                          "<link href=\"/css/mooglade-css-bundle.min.css?\" rel=\"stylesheet\" />\r" +
-                          "</head>" +
-                          "<body><div class=\"container-fluid\" style=\"font-family: Consolas\">" +
-                          "<table class=\"table table-bordered table-hover table-sm table-responsive\">" +
-                          "<thead>");
-                sb.Append("<tr><th>Lifetime</th><th>Instance</th></tr>");
-                sb.Append("</thead><tbody>");
-                foreach (var svc in _services.Where(svc => svc.ImplementationType != null).OrderBy(svc => svc.ImplementationType.FullName))
-                {
-                    sb.Append("<tr>");
-                    sb.Append($"<td>{svc.Lifetime}</td>");
-                    sb.Append($"<td>{svc.ImplementationType.FullName}</td>");
-                    sb.Append("</tr>");
-                }
-                sb.Append("</tbody></table></div></body></html>");
-                context.Response.ContentType = "text/html";
-                await context.Response.WriteAsync(sb.ToString());
-            }));
-        }
         #endregion
     }
 }

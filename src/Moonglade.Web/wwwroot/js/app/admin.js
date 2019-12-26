@@ -18,7 +18,7 @@ var postEditor = {
                 selector: textareaSelector,
                 themes: 'silver',
                 skin: 'oxide',
-                height: 650,
+                //height: 650,
                 relative_urls: false, // avoid image upload fuck up
                 browser_spellcheck: true,
                 branding: false,
@@ -47,6 +47,15 @@ var postEditor = {
             });
         }
     },
+    loadMdEditor: function (textareaSelector) {
+        if (window.SimpleMDE) {
+            var simplemde = new SimpleMDE({
+                element: $(textareaSelector)[0],
+                spellChecker: false,
+                status: false
+            });
+        }
+    },
     initEvents: function () {
         $('#Title').change(function () {
             $('#Slug').val(slugify($(this).val()));
@@ -72,6 +81,15 @@ var postEditor = {
                 displayKey: 'name',
                 valueKey: 'name',
                 source: tagnames.ttAdapter()
+            },
+            trimValue: true
+        });
+
+        $('#Tags').on('beforeItemAdd', function (event) {
+            if (!/^[a-zA-Z 0-9\.\-\+\#\s]*$/i.test(event.item)) {
+                console.warn(`Invalid tag name: ${event.item}`);
+                toastr.warning(`Invalid tag name: ${event.item}`);
+                event.cancel = true;
             }
         });
 
@@ -94,7 +112,9 @@ var postEditor = {
         });
 
         function submitForm(e) {
-            window.tinyMCE.triggerSave();
+            if (window.tinyMCE) {
+                window.tinyMCE.triggerSave();
+            }
 
             var selectCatCount = 0;
             $('input[name="SelectedCategoryIds"]').each(function () {
@@ -222,3 +242,73 @@ var onPostCreateEditFailed = function (context) {
         alert(`Error: ${message}`);
     }
 };
+
+var btnSubmitPage = '#btn-submit';
+var onPageCreateEditBegin = function () {
+    $(btnSubmitPage).text('Saving...');
+    $(btnSubmitPage).addClass('disabled');
+    $(btnSubmitPage).attr('disabled', 'disabled');
+};
+
+var onPageCreateEditComplete = function () {
+    $(btnSubmitPage).text('Save');
+    $(btnSubmitPage).removeClass('disabled');
+    $(btnSubmitPage).removeAttr('disabled');
+};
+
+var onPageCreateEditSuccess = function (data) {
+    if (data.pageId) {
+        $('input[name="Id"]').val(data.pageId);
+        toastr.success('Page saved successfully.');
+    }
+};
+
+var onPageCreateEditFailed = function (context) {
+    var message = context.responseJSON.message;
+    if (window.toastr) {
+        window.toastr.error(message);
+    } else {
+        alert(`Error: ${message}`);
+    }
+};
+
+function tryRestartWebsite() {
+    var nonce = Math.floor((Math.random() * 128) + 1);
+    ajaxPostWithCSRFToken("shutdown", { nonce }, function () { });
+    $(".btn-restart").text("Wait...");
+    $(".btn-restart").addClass("disabled");
+    $(".btn-restart").attr("disabled", "disabled");
+    startTimer(30, $(".btn-restart"));
+    setTimeout(function () {
+        location.href = "/admin/settings";
+    }, 30000);
+}
+
+function tryResetWebsite() {
+    var nonce = Math.floor((Math.random() * 128) + 1);
+    ajaxPostWithCSRFToken("reset", { nonce }, function () { });
+    $(".btn-reset").text("Wait...");
+    $(".btn-reset").addClass("disabled");
+    $(".btn-reset").attr("disabled", "disabled");
+    startTimer(30, $(".btn-reset"));
+    setTimeout(function () {
+        location.href = "/";
+    }, 30000);
+}
+
+function startTimer(duration, display) {
+    var timer = duration, minutes, seconds;
+    setInterval(function () {
+        minutes = parseInt(timer / 60, 10);
+        seconds = parseInt(timer % 60, 10);
+
+        minutes = minutes < 10 ? "0" + minutes : minutes;
+        seconds = seconds < 10 ? "0" + seconds : seconds;
+
+        display.text(minutes + ":" + seconds);
+
+        if (--timer < 0) {
+            timer = duration;
+        }
+    }, 1000);
+}

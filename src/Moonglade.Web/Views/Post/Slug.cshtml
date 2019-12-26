@@ -1,15 +1,11 @@
-﻿@using Microsoft.Extensions.Options
-@using Moonglade.Configuration.Abstraction
-@using Moonglade.Core
-@using Moonglade.Model.Settings
+﻿@using Moonglade.Core
 
 @model PostSlugViewModelWrapper
-@inject IOptions<AppSettings> Settings
 @inject Microsoft.AspNetCore.Http.IHttpContextAccessor HttpContextAccessor
-@inject IBlogConfig BlogConfig
 
 @{
     ViewBag.ShowBloggerIntroInXS = true;
+    var ec = Settings.Value.Editor;
 }
 
 @section keywords {
@@ -25,21 +21,24 @@
         <meta name="robots" content="noindex, nofollow" />
     }
 
+    <meta name="title" content="@Model.PostModel.Title" />
+    <meta name="displaydate" content="@Model.PostModel.PubDateUtc.ToString("u")">
+    <meta property="og:site_name" content="@BlogConfig.GeneralSettings.SiteTitle">
+    <meta name="copyright" content="(C) @Model.PostModel.PubDateUtc.Year @BlogConfig.GeneralSettings.SiteTitle">
+    <meta name="author" content="@BlogConfig.BlogOwnerSettings.Name" />
+}
+
+@section metadescription{
     @if (Model.PostModel.Tags.Count > 0)
     {
         <meta name="description" content="@Model.PostModel.Abstract" />
     }
-
-    <meta name="title" content="@Model.PostModel.Title" />
-    <meta name="displaydate" content="@Model.PostModel.PubDateUtc.ToString("u")">
-    <meta property="og:site_name" content="@BlogConfig.GeneralSettings.SiteTitle">
-    <meta name="copyright" content="(C) 2009 - @DateTime.UtcNow.Year edi.wang">
-    <meta name="author" content="@BlogConfig.BlogOwnerSettings.Name" />
 }
+
 @section head {
     @if (null == ViewBag.IsDraftPreview)
     {
-        <link href="~/lib/simplemde/simplemde.min.css" rel="stylesheet" />
+        <link id="css-simplemde" href="~/lib/simplemde/simplemde.min.css" rel="stylesheet" />
     }
 }
 @section scripts {
@@ -50,7 +49,7 @@
         <script src="~/lib/simplemde/simplemde.min.js"></script>
     }
 
-    @if (Settings.Value.EnableImageLazyLoad)
+    @if (BlogConfig.ContentSettings.EnableImageLazyLoad)
     {
         <script>
             $(function () {
@@ -90,6 +89,14 @@
                     }
                 </text>
             }
+
+            $('.lightswitch').click(function() {
+                if (postSlug.isDarkMode) {
+                    postSlug.useLightMode();
+                } else {
+                    postSlug.useDarkMode();
+                }
+            });
         });
     </script>
 }
@@ -117,23 +124,23 @@
 
         <div class="d-block d-sm-none">
             <div class="post-publish-info bg-light">
-                <time datetime="@Model.PostModel.PubDateUtc.ToString("u")">@Utils.UtcToZoneTime(Model.PostModel.PubDateUtc, Settings.Value.TimeZone).ToString("yyyy-M-d HH:mm")</time>
+                <time datetime="@Model.PostModel.PubDateUtc.ToString("u")" title="GMT @Model.PostModel.PubDateUtc">@Utils.UtcToZoneTime(Model.PostModel.PubDateUtc, BlogConfig.GeneralSettings.TimeZoneUtcOffset).ToString("MM/dd/yyyy")</time>
                 @if (Model.PostModel.LastModifyOnUtc.HasValue)
                 {
-                    <span>(Last Edit @Utils.UtcToZoneTime(Model.PostModel.LastModifyOnUtc.Value, Settings.Value.TimeZone).ToString("yyyy-M-d HH:mm"))</span>
+                    <span>(Edit on @Utils.UtcToZoneTime(Model.PostModel.LastModifyOnUtc.Value, BlogConfig.GeneralSettings.TimeZoneUtcOffset).ToString("MM/dd/yyyy HH:mm"))</span>
                 }
-                | UTC+@Settings.Value.TimeZone:00
+                | @BlogConfig.GeneralSettings.TimeZoneId
             </div>
         </div>
 
         <div class="d-none d-md-block post-publish-info mb-2">
             <strong class="text-muted">
-                <time datetime="@Model.PostModel.PubDateUtc.ToString("u")">@Utils.UtcToZoneTime(Model.PostModel.PubDateUtc, Settings.Value.TimeZone).ToString("yyyy-M-d HH:mm")</time>
+                <time datetime="@Model.PostModel.PubDateUtc.ToString("u")" title="GMT @Model.PostModel.PubDateUtc">@Utils.UtcToZoneTime(Model.PostModel.PubDateUtc, BlogConfig.GeneralSettings.TimeZoneUtcOffset).ToString("MM/dd/yyyy")</time>
                 @if (Model.PostModel.LastModifyOnUtc.HasValue)
                 {
-                    <span>(Last Edit @Utils.UtcToZoneTime(Model.PostModel.LastModifyOnUtc.Value, Settings.Value.TimeZone).ToString("yyyy-M-d HH:mm"))</span>
+                    <span>(Edit on @Utils.UtcToZoneTime(Model.PostModel.LastModifyOnUtc.Value, BlogConfig.GeneralSettings.TimeZoneUtcOffset).ToString("MM/dd/yyyy HH:mm"))</span>
                 }
-                | UTC+@Settings.Value.TimeZone:00
+                | @BlogConfig.GeneralSettings.TimeZoneId
             </strong>
             <span class="badge badge-secondary float-right post-hit-number">@Model.PostModel.Hits Reads</span>
         </div>
@@ -163,7 +170,7 @@
                                    asp-controller="Category"
                                    asp-action="List"
                                    asp-route-categoryName="@item.Name.ToLower()">
-                                    <span class="fas fa-archive" aria-hidden="true"></span>
+                                    <span class="icon-folder" aria-hidden="true"></span>
                                     @item.DisplayName
                                 </a>
                             </li>
@@ -176,8 +183,24 @@
         <hr class="post-header-hr" />
     </header>
     <section class="post-content clearfix">
-        @Html.Raw(Model.PostModel.Content)
+        @switch (ec)
+        {
+            case EditorChoice.Markdown:
+                @Html.Raw(Utils.ConvertMarkdownContent(Model.PostModel.Content, Utils.MarkdownConvertType.Html, false))
+                break;
+            case EditorChoice.None:
+            case EditorChoice.HTML:
+            default:
+                @Html.Raw(Model.PostModel.Content)
+                break;
+        }
     </section>
+    @if (BlogConfig.ContentSettings.ShowPostFooter)
+    {
+        <section class="post-footer clearfix">
+            @Html.Raw(BlogConfig.ContentSettings.PostFooterHtmlPitch)
+        </section>
+    }
     @if (null == ViewBag.IsDraftPreview)
     {
         <partial name="_PostSlugActions" />
@@ -285,6 +308,11 @@
             It will show up once blog administrator approved your comment.
         </div>
 
+        <div id="thx-for-comment-non-review" class="alert alert-success" style="display: none;">
+            Thanks for your comment. <br />
+            Refresh the page to see your comment.
+        </div>
+
         @if (Model.PostModel.CommentCount > 0)
         {
             <section id="comments-list">
@@ -293,3 +321,7 @@
         }
     </div>
 }
+
+<div class="lightswitch border rounded">
+    <span id="lighticon" class="icon-sun-o"></span>
+</div>

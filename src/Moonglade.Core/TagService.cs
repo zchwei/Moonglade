@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Threading.Tasks;
 using Edi.Practice.RequestResponseModel;
 using Microsoft.Extensions.Logging;
@@ -75,7 +74,7 @@ namespace Moonglade.Core
                 _postTagRepository.Delete(postTags);
 
                 // 2. Delte Tag itslef
-                int rows = _tagRepository.Delete(tagId);
+                var rows = _tagRepository.Delete(tagId);
                 return new Response(rows > 0);
             });
         }

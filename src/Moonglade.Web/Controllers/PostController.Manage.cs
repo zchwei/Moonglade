@@ -53,10 +53,10 @@ namespace Moonglade.Web.Controllers
         }
 
         [Authorize]
-        [Route("manage/edit")]
+        [Route("manage/edit/{id:guid}")]
         public async Task<IActionResult> Edit(Guid id, [FromServices] IHtmlCodec htmlCodec)
         {
-            var postResponse = _postService.GetPost(id);
+            var postResponse = await _postService.GetPostAsync(id);
             if (!postResponse.IsSuccess)
             {
                 return ServerError();
@@ -69,7 +69,9 @@ namespace Moonglade.Web.Controllers
                 {
                     PostId = post.Id,
                     IsPublished = post.IsPublished,
-                    HtmlContent = htmlCodec.HtmlDecode(post.EncodedHtmlContent),
+                    EditorContent = AppSettings.Editor == Model.Settings.EditorChoice.Markdown ? 
+                                                        post.RawPostContent : 
+                                                        htmlCodec.HtmlDecode(post.RawPostContent),
                     Slug = post.Slug,
                     Title = post.Title,
                     EnableComment = post.CommentEnabled,
@@ -80,7 +82,7 @@ namespace Moonglade.Web.Controllers
 
                 var tagStr = post.Tags
                                  .Select(p => p.TagName)
-                                 .Aggregate(string.Empty, (current, item) => current + (item + ","));
+                                 .Aggregate(string.Empty, (current, item) => current + item + ",");
 
                 tagStr = tagStr.TrimEnd(',');
                 editViewModel.Tags = tagStr;
@@ -120,7 +122,7 @@ namespace Moonglade.Web.Controllers
             {
                 if (ModelState.IsValid)
                 {
-                    string[] tagList = string.IsNullOrWhiteSpace(model.Tags)
+                    var tagList = string.IsNullOrWhiteSpace(model.Tags)
                                              ? new string[] { }
                                              : model.Tags.Split(',').ToArray();
 
@@ -128,7 +130,7 @@ namespace Moonglade.Web.Controllers
                     {
                         Title = model.Title.Trim(),
                         Slug = model.Slug.Trim(),
-                        HtmlContent = model.HtmlContent,
+                        EditorContent = model.EditorContent,
                         EnableComment = model.EnableComment,
                         ExposedToSiteMap = model.ExposedToSiteMap,
                         IsFeedIncluded = model.FeedIncluded,
@@ -152,11 +154,13 @@ namespace Moonglade.Web.Controllers
                             var pubDate = response.Item.PostPublish.PubDateUtc.GetValueOrDefault();
                             var link = GetPostUrl(linkGenerator, pubDate, response.Item.Slug);
 
-                            if (AppSettings.EnablePingBackSend)
+                            if (_blogConfig.AdvancedSettings.EnablePingBackSend)
                             {
                                 Task.Run(async () => { await pingbackSender.TrySendPingAsync(link, response.Item.PostContent); });
                             }
                         }
+
+                        Logger.LogInformation($"User '{User.Identity.Name}' updated post id '{response.Item.Id}'");
 
                         return Json(new { PostId = response.Item.Id });
                     }
@@ -193,6 +197,8 @@ namespace Moonglade.Web.Controllers
         public IActionResult Delete(Guid postId)
         {
             var response = _postService.Delete(postId, true);
+            Logger.LogInformation($"User '{User.Identity.Name}' recycling post id '{postId}'");
+
             return response.IsSuccess ? Json(postId) : ServerError();
         }
 
@@ -204,6 +210,7 @@ namespace Moonglade.Web.Controllers
             var response = _postService.Delete(postId);
             if (response.IsSuccess)
             {
+                Logger.LogInformation($"User '{User.Identity.Name}' deleted post id '{postId}'");
                 return Json(postId);
             }
 
@@ -216,7 +223,24 @@ namespace Moonglade.Web.Controllers
         public async Task<IActionResult> EmptyRecycleBin()
         {
             await _postService.DeleteRecycledPostsAsync();
+            Logger.LogInformation($"User '{User.Identity.Name}' emptied recycle bin");
             return RedirectToAction("RecycleBin");
+        }
+
+        [Authorize]
+        [HttpGet("manage/insights")]
+        public async Task<IActionResult> Insights()
+        {
+            var topReadList = await _postService.GetMPostInsightsMetaListAsync(PostInsightsType.TopRead);
+            var topCommentedList = await _postService.GetMPostInsightsMetaListAsync(PostInsightsType.TopCommented);
+
+            var vm = new PostInsightsViewModel
+            {
+                TopReadPosts = topReadList,
+                TopCommentedPosts = topCommentedList
+            };
+
+            return View(vm);
         }
 
         #endregion

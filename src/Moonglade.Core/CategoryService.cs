@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Edi.Practice.RequestResponseModel;
 using Microsoft.Extensions.Logging;
@@ -108,7 +109,7 @@ namespace Moonglade.Core
                     DisplayName = createCategoryRequest.DisplayName
                 };
 
-                Logger.LogInformation("Adding new categoryEntity to database.");
+                Logger.LogInformation($"Adding new categoryEntity to database: {JsonSerializer.Serialize(category)}");
                 _categoryRepository.Add(category);
                 return new SuccessResponse();
             });
@@ -123,7 +124,10 @@ namespace Moonglade.Core
 
                 Logger.LogInformation($"Removing Post-Category associations for category id: {id}");
                 var pcs = _postCategoryRepository.Get(pc => pc.CategoryId == id);
-                _postCategoryRepository.Delete(pcs);
+                if (null != pcs)
+                {
+                    _postCategoryRepository.Delete(pcs);
+                }
 
                 Logger.LogInformation($"Removing categoryEntity {id}");
                 _categoryRepository.Delete(id);

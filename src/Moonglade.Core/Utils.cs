@@ -1,17 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using System.Linq;
 using System.Text.RegularExpressions;
-using System.Web;
+using System.Threading.Tasks;
 using Edi.Practice.RequestResponseModel;
 using Markdig;
-using Moonglade.HtmlCodec;
+using TimeZoneConverter;
 
 namespace Moonglade.Core
 {
@@ -20,28 +18,27 @@ namespace Moonglade.Core
         public static string AppVersion =>
             Assembly.GetEntryAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>().InformationalVersion;
 
-        public static void ResizePngImage(string originImagePath, int toWidth, int toHeight, string savePath)
+        public static async Task<string> GetThemeColorAsync(string webRootPath, string currentTheme)
         {
-            var fs = new FileStream(originImagePath, FileMode.Open, FileAccess.Read);
-            var resizedImage = ResizeImage(fs, toWidth, toHeight);
-            resizedImage.Save(savePath, ImageFormat.Png);
-        }
+            var cssPath = Path.Combine(webRootPath, "css", "theme", currentTheme);
 
-        public static Bitmap ResizeImage(Stream originImageStream, int toWidth, int toHeight)
-        {
-            using (originImageStream)
-            using (var image = new Bitmap(originImageStream))
+            if (File.Exists(cssPath))
             {
-                var resized = new Bitmap(toWidth, toHeight);
-                using (var graphics = Graphics.FromImage(resized))
+                var lines = await File.ReadAllLinesAsync(cssPath);
+                var accentColorLine = lines.FirstOrDefault(l => l.Contains("accent-color1"));
+                if (null != accentColorLine)
                 {
-                    graphics.CompositingQuality = CompositingQuality.HighQuality;
-                    graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                    graphics.CompositingMode = CompositingMode.SourceCopy;
-                    graphics.DrawImage(image, 0, 0, toWidth, toHeight);
-                    return resized;
+                    var regex = new Regex("#(?:[0-9a-f]{3}){1,2}");
+                    var match = regex.Match(accentColorLine);
+                    if (match.Success)
+                    {
+                        var colorHex = match.Captures[0].Value;
+                        return colorHex;
+                    }
                 }
             }
+
+            return "#FFFFFF";
         }
 
         public static string GetMonthNameByNumber(int number)
@@ -54,6 +51,13 @@ namespace Moonglade.Core
             return CultureInfo.GetCultureInfo("en-US").DateTimeFormat.GetMonthName(number);
         }
 
+        public static string FormatCopyright2Html(string copyrightCode)
+        {
+            var result = copyrightCode.Replace("[c]", "&copy;")
+                                      .Replace("[year]", DateTime.UtcNow.Year.ToString());
+            return result;
+        }
+
         public static string RemoveWhiteSpaceFromStylesheets(string body)
         {
             if (string.IsNullOrWhiteSpace(body))
@@ -61,7 +65,7 @@ namespace Moonglade.Core
                 return string.Empty;
             }
 
-            body = Regex.Replace(body, @"[a-zA-Z]+#", "#");
+            body = Regex.Replace(body, "[a-zA-Z]+#", "#");
             body = Regex.Replace(body, @"[\n\r]+\s*", string.Empty);
             body = Regex.Replace(body, @"\s+", " ");
             body = Regex.Replace(body, @"\s?([:,;{}])\s?", "$1");
@@ -72,6 +76,31 @@ namespace Moonglade.Core
             return body;
         }
 
+        public static string RemoveScriptTagFromHtml(string html)
+        {
+            if (string.IsNullOrWhiteSpace(html))
+            {
+                return string.Empty;
+            }
+
+            var regex = new Regex("\\<script(.+?)\\</script\\>", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+            var result = regex.Replace(html, string.Empty);
+            return result;
+        }
+
+        public static IDictionary<string, string> GetThemes()
+        {
+            var dic = new Dictionary<string, string>
+            {
+                {"Word Blue", "word-blue.css"},
+                {"Excel Green", "excel-green.css"},
+                {"PowerPoint Orange", "powerpoint-orange.css"},
+                {"OneNote Purple", "onenote-purple.css"},
+                {"Outlook Blue", "outlook-blue.css"}
+            };
+            return dic;
+        }
+
         public static string ResolveImageStoragePath(string contentRootPath, string path)
         {
             if (string.IsNullOrWhiteSpace(path))
@@ -79,7 +108,7 @@ namespace Moonglade.Core
                 throw new ArgumentNullException(nameof(path));
             }
 
-            var basedirStr = "${basedir}"; // Do not use "." because there could be "." in path.
+            const string basedirStr = "${basedir}"; // Do not use "." because there could be "." in path.
             if (path.IndexOf(basedirStr, StringComparison.Ordinal) > 0)
             {
                 throw new NotSupportedException($"{basedirStr} can only be at the beginning.");
@@ -123,25 +152,19 @@ namespace Moonglade.Core
 
         public static bool IsValidUrl(this string url, UrlScheme urlScheme = UrlScheme.All)
         {
-            bool isValidUrl = Uri.TryCreate(url, UriKind.Absolute, out var uriResult);
+            var isValidUrl = Uri.TryCreate(url, UriKind.Absolute, out var uriResult);
             if (!isValidUrl)
             {
                 return false;
             }
 
-            switch (urlScheme)
+            isValidUrl &= urlScheme switch
             {
-                case UrlScheme.All:
-                    isValidUrl &= uriResult.Scheme == Uri.UriSchemeHttps || uriResult.Scheme == Uri.UriSchemeHttp;
-                    break;
-                case UrlScheme.Https:
-                    isValidUrl &= uriResult.Scheme == Uri.UriSchemeHttps;
-                    break;
-                case UrlScheme.Http:
-                    isValidUrl &= uriResult.Scheme == Uri.UriSchemeHttp;
-                    break;
-            }
-
+                UrlScheme.All => uriResult.Scheme == Uri.UriSchemeHttps || uriResult.Scheme == Uri.UriSchemeHttp,
+                UrlScheme.Https => uriResult.Scheme == Uri.UriSchemeHttps,
+                UrlScheme.Http => uriResult.Scheme == Uri.UriSchemeHttp,
+                _ => throw new ArgumentOutOfRangeException(nameof(urlScheme), urlScheme, null)
+            };
             return isValidUrl;
         }
 
@@ -158,14 +181,47 @@ namespace Moonglade.Core
             return url.TrimEnd('/') + "/" + path.TrimStart('/');
         }
 
-        public static DateTime UtcToZoneTime(DateTime utcTime, int timeZone)
+        public static IEnumerable<TimeZoneInfo> GetTimeZones()
         {
-            return utcTime.AddHours(timeZone);
+            return TimeZoneInfo.GetSystemTimeZones();
         }
 
-        public static string GetPostAbstract(string rawHtmlContent, int wordCount, IHtmlCodec htmlCodec = null)
+        public static TimeSpan GetTimeSpanByZoneId(string timeZoneId)
         {
-            var plainText = RemoveTags(rawHtmlContent, false, htmlCodec);
+            if (string.IsNullOrWhiteSpace(timeZoneId))
+            {
+                return TimeSpan.Zero;
+            }
+
+            // Reference: https://devblogs.microsoft.com/dotnet/cross-platform-time-zones-with-net-core/
+            var tz = TZConvert.GetTimeZoneInfo(timeZoneId);
+            return tz.BaseUtcOffset;
+        }
+
+        public static DateTime UtcToZoneTime(DateTime utcTime, string timeSpan)
+        {
+            if (string.IsNullOrWhiteSpace(timeSpan))
+            {
+                timeSpan = TimeSpan.FromSeconds(0).ToString();
+            }
+
+            // Ugly code for workaround https://github.com/EdiWang/Moonglade/issues/310
+            var ok = TimeSpan.TryParse(timeSpan, out var span);
+            if (!ok)
+            {
+                throw new FormatException($"{nameof(timeSpan)} is not a valid TimeSpan format");
+            }
+
+            var tz = GetTimeZones().FirstOrDefault(t => t.BaseUtcOffset == span);
+            return null != tz ? TimeZoneInfo.ConvertTimeFromUtc(utcTime, tz) : utcTime.AddTicks(span.Ticks);
+        }
+
+        public static string GetPostAbstract(string rawContent, int wordCount, bool useMarkdown = false)
+        {
+            var plainText = useMarkdown ?
+                            ConvertMarkdownContent(rawContent, MarkdownConvertType.Text) :
+                            RemoveTags(rawContent);
+
             var result = plainText.Ellipsize(wordCount);
             return result;
         }
@@ -208,12 +264,12 @@ namespace Moonglade.Core
 
         public static bool IsLetter(this char c)
         {
-            return ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z');
+            return 'A' <= c && c <= 'Z' || 'a' <= c && c <= 'z';
         }
 
         public static bool IsSpace(this char c)
         {
-            return (c == '\r' || c == '\n' || c == '\t' || c == '\f' || c == ' ');
+            return c == '\r' || c == '\n' || c == '\t' || c == '\f' || c == ' ';
         }
 
         public static string Left(string sSource, int iLength)
@@ -226,7 +282,7 @@ namespace Moonglade.Core
             return sSource.Substring(iLength > sSource.Length ? 0 : sSource.Length - iLength);
         }
 
-        public static string RemoveTags(string html, bool htmlDecode = false, IHtmlCodec htmlCodec = null)
+        public static string RemoveTags(string html)
         {
             if (string.IsNullOrEmpty(html))
             {
@@ -257,12 +313,7 @@ namespace Moonglade.Core
 
             var stringResult = new string(result, 0, cursor);
 
-            if (htmlDecode)
-            {
-                stringResult = htmlCodec?.HtmlDecode(stringResult);
-            }
-
-            return stringResult;
+            return stringResult.Replace("&nbsp;", " ");
         }
 
         public static bool TryParseBase64(string input, out byte[] base64Array)
@@ -291,23 +342,26 @@ namespace Moonglade.Core
         {
             Tuple.Create(".", "dot"),
             Tuple.Create("#", "sharp"),
-            Tuple.Create("<", "lt"),
-            Tuple.Create(">", "gt"),
-            Tuple.Create("@", "at"),
-            Tuple.Create("$", "dollar"),
-            Tuple.Create("*", "asterisk"),
-            Tuple.Create("(", "lbrackets"),
-            Tuple.Create(")", "rbrackets"),
-            Tuple.Create("{", "lbraces"),
-            Tuple.Create("}", "rbraces"),
-            Tuple.Create(" ", "-"),
-            Tuple.Create("+", "-and-"),
-            Tuple.Create("=", "-equals-")
+            Tuple.Create(" ", "-")
         };
 
         public static string NormalizeTagName(string orgTagName)
         {
             return ReplaceWithStringBuilder(orgTagName, TagNormalizeSourceTable).ToLower();
+        }
+
+        public static bool ValidateTagName(string tagDisplayName)
+        {
+            if (string.IsNullOrWhiteSpace(tagDisplayName))
+            {
+                return false;
+            }
+
+            // Regex performance best practice
+            // See https://docs.microsoft.com/en-us/dotnet/standard/base-types/best-practices
+
+            const string pattern = @"^[a-zA-Z 0-9\.\-\+\#\s]*$";
+            return Regex.IsMatch(tagDisplayName, pattern);
         }
 
         private static string ReplaceWithStringBuilder(string value, IEnumerable<Tuple<string, string>> toReplace)
@@ -332,11 +386,40 @@ namespace Moonglade.Core
             return newStr;
         }
 
-        public static string MdContentToHtml(string markdown)
+        public static string ConvertMarkdownContent(string markdown, MarkdownConvertType type, bool disableHtml = true)
         {
-            var pipeline = new MarkdownPipelineBuilder().DisableHtml().Build();
-            var result = Markdown.ToHtml(markdown, pipeline);
+            var pipeline = GetMoongladeMarkdownPipelineBuilder();
+
+            if (disableHtml)
+            {
+                pipeline.DisableHtml();
+            }
+
+            var result = type switch
+            {
+                MarkdownConvertType.None => markdown,
+                MarkdownConvertType.Html => Markdown.ToHtml(markdown, pipeline.Build()),
+                MarkdownConvertType.Text => Markdown.ToPlainText(markdown, pipeline.Build()),
+                _ => throw new ArgumentOutOfRangeException(nameof(type), type, null)
+            };
+
             return result;
+        }
+
+        public enum MarkdownConvertType
+        {
+            None = 0,
+            Html = 1,
+            Text = 2
+        }
+
+        private static MarkdownPipelineBuilder GetMoongladeMarkdownPipelineBuilder()
+        {
+            var pipeline = new MarkdownPipelineBuilder()
+                .UsePipeTables()
+                .UseBootstrap();
+
+            return pipeline;
         }
 
         public static Response<(string Slug, DateTime PubDate)> GetSlugInfoFromPostUrl(string url)

@@ -10,8 +10,6 @@ namespace Moonglade.Web.Authentication
     {
         public static void AddMoongladeAuthenticaton(this IServiceCollection services, AuthenticationSettings authenticationSettings)
         {
-            AppDomain.CurrentDomain.SetData(nameof(AuthenticationSettings), authenticationSettings);
-
             switch (authenticationSettings.Provider)
             {
                 case AuthenticationProvider.AzureAD:
@@ -40,6 +38,8 @@ namespace Moonglade.Web.Authentication
                                 options.LogoutPath = "/admin/signout";
                             });
 
+                    break;
+                case AuthenticationProvider.None:
                     break;
                 default:
                     var msg = $"Provider {authenticationSettings.Provider} is not supported.";

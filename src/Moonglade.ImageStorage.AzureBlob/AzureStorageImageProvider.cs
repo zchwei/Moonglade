@@ -2,8 +2,8 @@
 using System.IO;
 using System.Threading.Tasks;
 using Edi.Practice.RequestResponseModel;
-using Microsoft.Azure.Storage;
-using Microsoft.Azure.Storage.Blob;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using Microsoft.Extensions.Logging;
 using Moonglade.Model;
 
@@ -13,7 +13,7 @@ namespace Moonglade.ImageStorage.AzureBlob
     {
         public string Name => nameof(AzureStorageImageProvider);
 
-        private readonly CloudBlobContainer _container;
+        private readonly BlobContainerClient _container;
 
         private readonly ILogger<AzureStorageImageProvider> _logger;
 
@@ -23,11 +23,9 @@ namespace Moonglade.ImageStorage.AzureBlob
             {
                 _logger = logger;
 
-                var storageAccount = CloudStorageAccount.Parse(storageInfo.ConnectionString);
-                var blobClient = storageAccount.CreateCloudBlobClient();
-                _container = blobClient.GetContainerReference(storageInfo.ContainerName);
+                _container = new BlobContainerClient(storageInfo.ConnectionString, storageInfo.ContainerName);
 
-                logger.LogInformation($"Created {nameof(AzureStorageImageProvider)} for account {storageAccount.BlobEndpoint} on container {_container.Name}");
+                logger.LogInformation($"Created {nameof(AzureStorageImageProvider)} for account {_container.AccountName} on container {_container.Name}");
             }
             catch (Exception e)
             {
@@ -47,39 +45,35 @@ namespace Moonglade.ImageStorage.AzureBlob
 
                 _logger.LogInformation($"Uploading {fileName} to Azure Blob Storage.");
 
-                var blockBlob = _container.GetBlockBlobReference(fileName);
+
+                var blob = _container.GetBlobClient(fileName);
 
                 // Why .NET Core doesn't have MimeMapping.GetMimeMapping()
-                string extension = Path.GetExtension(blockBlob.Uri.AbsoluteUri);
-                switch (extension.ToLower())
+                var blobHttpHeader = new BlobHttpHeaders();
+                var extension = Path.GetExtension(blob.Uri.AbsoluteUri);
+                blobHttpHeader.ContentType = extension.ToLower() switch
                 {
-                    case ".jpg":
-                    case ".jpeg":
-                        blockBlob.Properties.ContentType = "image/jpeg";
-                        break;
-                    case ".png":
-                        blockBlob.Properties.ContentType = "image/png";
-                        break;
-                    case ".gif":
-                        blockBlob.Properties.ContentType = "image/gif";
-                        break;
-                    default:
-                        break;
+                    ".jpg" => "image/jpeg",
+                    ".jpeg" => "image/jpeg",
+                    ".png" => "image/png",
+                    ".gif" => "image/gif",
+                    _ => blobHttpHeader.ContentType
+                };
+
+                await using (var fileStream = new MemoryStream(imageBytes))
+                {
+                    var uploadedBlob = await blob.UploadAsync(fileStream, blobHttpHeader);
+
+                    _logger.LogInformation($"Uploaded image file '{fileName}' to Azure Blob Storage, ETag '{uploadedBlob.Value.ETag}'. Yeah, the best cloud!");
                 }
 
-                using (var fileStream = new MemoryStream(imageBytes))
-                {
-                    await blockBlob.UploadFromStreamAsync(fileStream);
-                }
-
-                _logger.LogInformation($"Uploaded image file {fileName} to Azure Blob Storage! Yeah, the best cloud!");
 
                 return new SuccessResponse<string>(fileName);
             }
             catch (Exception e)
             {
                 _logger.LogError(e, $"Error uploading file {fileName} to Azure, it must be my problem, not Microsoft.");
-                return new FailedResponse<string>((int) ResponseFailureCode.GeneralException, e.Message, e);
+                return new FailedResponse<string>((int)ResponseFailureCode.GeneralException, e.Message, e);
             }
         }
 
@@ -87,11 +81,9 @@ namespace Moonglade.ImageStorage.AzureBlob
         {
             try
             {
-                var blockBlob = _container.GetBlockBlobReference(fileName);
-                var exists = await blockBlob.ExistsAsync();
-                if (exists)
+                var ok = await _container.DeleteBlobIfExistsAsync(fileName);
+                if (ok)
                 {
-                    await blockBlob.DeleteAsync();
                     return new SuccessResponse();
                 }
                 return new FailedResponse((int)ResponseFailureCode.ImageNotExistInAzureBlob);
@@ -109,23 +101,26 @@ namespace Moonglade.ImageStorage.AzureBlob
 
         public async Task<Response<ImageInfo>> GetAsync(string fileName)
         {
-            var blockBlob = _container.GetBlockBlobReference(fileName);
-            using (var memoryStream = new MemoryStream())
+            var blobClient = _container.GetBlobClient(fileName);
+            await using var memoryStream = new MemoryStream();
+            var extension = Path.GetExtension(fileName);
+            if (string.IsNullOrWhiteSpace(extension))
             {
-                var extension = Path.GetExtension(fileName);
-                if (string.IsNullOrWhiteSpace(extension))
-                {
-                    return new FailedResponse<ImageInfo>((int)ResponseFailureCode.ExtensionNameIsNull);
-                }
+                return new FailedResponse<ImageInfo>((int)ResponseFailureCode.ExtensionNameIsNull);
+            }
 
-                var exists = await blockBlob.ExistsAsync();
-                if (!exists)
-                {
-                    _logger.LogWarning($"Blob {fileName} not exist.");
-                    return new FailedResponse<ImageInfo>((int)ResponseFailureCode.ImageNotExistInAzureBlob);
-                }
+            // This needs to try-catch 404 status now :(
+            // See https://github.com/Azure/azure-sdk-for-net/issues/8952
+            //var exists = await blobClient.ExistsAsync();
+            //if (!exists)
+            //{
+            //    _logger.LogWarning($"Blob {fileName} not exist.");
+            //    return new FailedResponse<ImageInfo>((int)ResponseFailureCode.ImageNotExistInAzureBlob);
+            //}
 
-                await blockBlob.DownloadToStreamAsync(memoryStream);
+            try
+            {
+                await blobClient.DownloadToAsync(memoryStream);
                 var arr = memoryStream.ToArray();
 
                 var fileType = extension.Replace(".", string.Empty);
@@ -136,6 +131,15 @@ namespace Moonglade.ImageStorage.AzureBlob
                 };
 
                 return new SuccessResponse<ImageInfo>(imageInfo);
+            }
+            catch (Azure.RequestFailedException e)
+            {
+                if (e.Status == 404)
+                {
+                    return new FailedResponse<ImageInfo>((int)ResponseFailureCode.ImageNotExistInAzureBlob);
+                }
+
+                throw;
             }
         }
     }

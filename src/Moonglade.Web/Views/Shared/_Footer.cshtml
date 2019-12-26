@@ -1,17 +1,12 @@
-﻿@using Microsoft.Extensions.Options
-@using Moonglade.Configuration.Abstraction
-@using Moonglade.Core
-@using Moonglade.Model.Settings
-@inject IOptions<AppSettings> Settings
-@inject IBlogConfig BlogConfig
+﻿@using Moonglade.Core
 
-<footer>
+<footer id="moonglade-footer" class="bg-moonglade-accent2">
     <div class="container">
         <div class="row">
             <div class="col-md-3 col-sm-3">
                 <h4 class="d-none d-sm-block">Copyright</h4>
                 <div>
-                    @Html.Raw(BlogConfig.GeneralSettings.Copyright)
+                    @Html.Raw(Utils.FormatCopyright2Html(BlogConfig.GeneralSettings.Copyright))
                 </div>
                 <div class="mb-2">Designed and Developed by Edi Wang</div>
                 <small>
@@ -19,7 +14,7 @@
                 </small>
                 <br />
                 <small>
-                    <i class="fas fa-external-link-alt"></i>
+                    <span class="icon-link"></span>
                     <a asp-action="Index" asp-controller="Admin">Admin</a>
                 </small>
             </div>
@@ -28,55 +23,32 @@
                 <h4>Subscription</h4>
 
                 <a class="btn btn-sm btn-round btn-outline-footer" href="#" data-toggle="modal" data-target="#subscriptionmodal">
-                    <i class="fa fa-fw fa-rss"></i>
+                    <span class="icon-rss"></span>
                     RSS / Atom
                 </a>
 
                 <a class="btn btn-sm btn-round btn-outline-footer footer-opml-link" href="~/opml" target="_blank">
-                    <i class="fa fa-fw fa-code"></i>
+                    <span class="icon-embed2"></span>
                     OPML
                 </a>
             </div>
 
-            <div class="col-md-3 col-sm-3 d-none d-sm-block">
-                <h4>Friend Links</h4>
-                <cache expires-after="@TimeSpan.FromMinutes(60)">
-                    @await Component.InvokeAsync("FriendLink")
-                </cache>
-            </div>
+            @if (BlogConfig.FriendLinksSettings.ShowFriendLinksSection)
+            {
+                <div class="col-md-3 col-sm-3 d-none d-sm-block">
+                    <h4>Friend Links</h4>
+                    <cache expires-after="@TimeSpan.FromMinutes(60)">
+                        @await Component.InvokeAsync("FriendLink")
+                    </cache>
+                </div>
+            }
 
             <div class="col-md-3 col-sm-3">
-                <h4 class="d-none d-sm-block">Follow Me</h4>
-                <div class="qrcode-link">
-                    <a title="QR Code" href="#"
-                       data-toggle="modal" data-target="#qrmodal">
-                        <i class="fas fa-fw fa-qrcode"></i>
-                    </a>
-
-                    <a href="https://github.com/EdiWang" target="_blank">
-                        <i class="fab fa-fw fa-github"></i>
-                    </a>
-                </div>
+                @Html.Raw(BlogConfig.GeneralSettings.FooterCustomizedHtmlPitch)
             </div>
         </div>
     </div>
 </footer>
-
-<div class="modal fade" id="qrmodal" tabindex="-1" role="dialog" aria-labelledby="qrmodalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-sm" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h6 class="modal-title" id="qrmodalLabel">QR Code</h6>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
-            </div>
-            <div class="modal-body text-center">
-                <div class="site-qrcode m-auto"></div>
-            </div>
-        </div>
-    </div>
-</div>
 
 <div class="modal fade" id="subscriptionmodal" tabindex="-1" role="dialog" aria-labelledby="subscriptionmodalLabel" aria-hidden="true">
     <div class="modal-dialog" role="document">

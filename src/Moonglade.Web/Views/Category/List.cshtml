@@ -1,7 +1,4 @@
-﻿@using Moonglade.Configuration.Abstraction
-@model X.PagedList.StaticPagedList<Moonglade.Model.PostListItem>
-
-@inject IBlogConfig BlogConfig
+﻿@model X.PagedList.StaticPagedList<Moonglade.Model.PostListItem>
 
 @{
     ViewBag.TitlePrefix = ViewBag.CategoryDisplayName + " - " + BlogConfig.GeneralSettings.SiteTitle;
@@ -15,7 +12,7 @@
        asp-action="Rss"
        asp-route-categoryName="@(((string)ViewBag.CategoryName).ToLower())" target="_blank"
        title="Subscribe @(ViewBag.CategoryDisplayName)">
-        <i class="fas fa-rss"></i>
+        <span class="icon-rss"></span>
     </a>
     <span>@ViewBag.CategoryDisplayName</span>
     <span class="badge d-inline d-sm-none float-right">@Model.TotalItemCount</span>

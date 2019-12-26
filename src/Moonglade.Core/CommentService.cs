@@ -11,7 +11,6 @@ using Moonglade.Configuration.Abstraction;
 using Moonglade.Data.Entities;
 using Moonglade.Data.Infrastructure;
 using Moonglade.Data.Spec;
-using Moonglade.HtmlCodec;
 using Moonglade.Model;
 using Moonglade.Model.Settings;
 
@@ -20,7 +19,6 @@ namespace Moonglade.Core
     public class CommentService : MoongladeService
     {
         private readonly IBlogConfig _blogConfig;
-        private readonly IHtmlCodec _htmlCodec;
 
         private readonly IRepository<PostEntity> _postRepository;
         private readonly IRepository<CommentEntity> _commentRepository;
@@ -30,13 +28,11 @@ namespace Moonglade.Core
             ILogger<CommentService> logger,
             IOptions<AppSettings> settings,
             IBlogConfig blogConfig,
-            IHtmlCodec htmlCodec,
             IRepository<CommentEntity> commentRepository,
-            IRepository<CommentReplyEntity> commentReplyRepository, 
+            IRepository<CommentReplyEntity> commentReplyRepository,
             IRepository<PostEntity> postRepository) : base(logger, settings)
         {
             _blogConfig = blogConfig;
-            _htmlCodec = htmlCodec;
 
             _commentRepository = commentRepository;
             _commentReplyRepository = commentReplyRepository;
@@ -110,6 +106,7 @@ namespace Moonglade.Core
                 {
                     cmt.IsApproved = !cmt.IsApproved;
                     await _commentRepository.UpdateAsync(cmt);
+                    Logger.LogInformation($"Updated comment approval status to '{cmt.IsApproved}' for comment id: '{cmt.Id}'");
                 }
 
                 return new SuccessResponse();
@@ -129,10 +126,12 @@ namespace Moonglade.Core
                     if (cReplies.Any())
                     {
                         _commentReplyRepository.Delete(cReplies);
+                        Logger.LogInformation($"Deleted comment replies under comment id: '{cmt.Id}'");
                     }
 
                     // 2. Delete comment itself
                     _commentRepository.Delete(cmt);
+                    Logger.LogInformation($"Deleted comment id: '{cmt.Id}'");
                 }
 
                 return new SuccessResponse();
@@ -150,20 +149,18 @@ namespace Moonglade.Core
                 }
 
                 // 2. Check user email domain
-                var bannedDomains = _blogConfig.EmailSettings.BannedMailDomain;
-                if (bannedDomains.Any())
+                var bannedDomains = _blogConfig.EmailSettings.BannedMailDomain?.Split(",");
+                if (null != bannedDomains && bannedDomains.Any())
                 {
                     var address = new MailAddress(request.Email);
                     if (bannedDomains.Contains(address.Host))
                     {
+                        Logger.LogWarning($"Email host '{address.Host}' is found in ban list, rejecting comments.");
                         return new FailedResponse<CommentListItem>((int)ResponseFailureCode.EmailDomainBlocked);
                     }
                 }
 
-                // 3. Encode HTML
-                request.Username = _htmlCodec.HtmlEncode(request.Username);
-
-                // 4. Harmonize banned keywords
+                // 3. Harmonize banned keywords
                 if (_blogConfig.ContentSettings.EnableWordFilter)
                 {
                     var dw = _blogConfig.ContentSettings.DisharmonyWords;
@@ -181,7 +178,7 @@ namespace Moonglade.Core
                     CreateOnUtc = DateTime.UtcNow,
                     Email = request.Email,
                     IPAddress = request.IpAddress,
-                    IsApproved = false,
+                    IsApproved = !_blogConfig.ContentSettings.RequireCommentReview,
                     UserAgent = request.UserAgent
                 };
 

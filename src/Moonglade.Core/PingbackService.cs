@@ -5,17 +5,17 @@ using Edi.Blog.Pingback;
 using Edi.Practice.RequestResponseModel;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Moonglade.Core.Notification;
 using Moonglade.Data.Entities;
 using Moonglade.Data.Infrastructure;
 using Moonglade.Data.Spec;
 using Moonglade.Model;
-using Moonglade.Notification;
 
 namespace Moonglade.Core
 {
     public class PingbackService : MoongladeService
     {
-        private readonly IMoongladeNotification _notification;
+        private readonly IMoongladeNotificationClient _notificationClient;
 
         private readonly IPingbackReceiver _pingbackReceiver;
 
@@ -25,12 +25,12 @@ namespace Moonglade.Core
 
         public PingbackService(
             ILogger<PingbackService> logger,
-            IMoongladeNotification notification,
             IPingbackReceiver pingbackReceiver,
             IRepository<PingbackHistoryEntity> pingbackRepository,
-            IRepository<PostEntity> postRepository) : base(logger)
+            IRepository<PostEntity> postRepository,
+            IMoongladeNotificationClient notificationClient = null) : base(logger)
         {
-            _notification = notification;
+            _notificationClient = notificationClient;
             _pingbackReceiver = pingbackReceiver;
             _pingbackRepository = pingbackRepository;
             _postRepository = postRepository;
@@ -41,12 +41,14 @@ namespace Moonglade.Core
             var response = await _pingbackReceiver.ValidatePingRequest(context);
             if (response == PingbackValidationResult.ValidPingRequest)
             {
-                Logger.LogInformation($"Pingback Attempt from {context.Connection.RemoteIpAddress} is valid");
+                Logger.LogInformation($"Pingback attempt from '{context.Connection.RemoteIpAddress}' is valid");
 
                 var pingRequest = await _pingbackReceiver.GetPingRequest();
                 var postResponse = TryGetPostIdTitle(pingRequest.TargetUrl, out var idTitleTuple);
                 if (postResponse)
                 {
+                    Logger.LogInformation($"Post '{idTitleTuple.Id}:{idTitleTuple.Title}' is found for ping.");
+
                     _pingbackReceiver.OnPingSuccess += async (sender, args) => await SavePingbackRecord(
                         new PingbackRequest
                         {
@@ -145,7 +147,10 @@ namespace Moonglade.Core
                     TargetPostTitle = p.TargetPostTitle
                 });
 
-            await _notification.SendPingNotificationAsync(pingback);
+            if (null != _notificationClient)
+            {
+                await _notificationClient.SendPingNotificationAsync(pingback);
+            }
         }
 
         private async Task SavePingbackRecord(PingbackRequest request)

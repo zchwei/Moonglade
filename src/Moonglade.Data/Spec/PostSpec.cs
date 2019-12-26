@@ -6,7 +6,7 @@ using Moonglade.Data.Infrastructure;
 
 namespace Moonglade.Data.Spec
 {
-    public sealed partial class PostSpec : BaseSpecification<PostEntity>
+    public sealed class PostSpec : BaseSpecification<PostEntity>
     {
         public PostSpec(Guid? categoryId, int? top = null) :
             base(p => !p.PostPublish.IsDeleted &&
@@ -27,6 +27,9 @@ namespace Moonglade.Data.Spec
             base(p => p.PostPublish.PubDateUtc.Value.Year == year &&
                       (month == 0 || p.PostPublish.PubDateUtc.Value.Month == month))
         {
+            // Fix #313: Filter out unpublished posts
+            AddCriteria(p => p.PostPublish.IsPublished && !p.PostPublish.IsDeleted);
+
             AddInclude(post => post.Include(p => p.PostPublish));
             ApplyOrderByDescending(p => p.PostPublish.PubDateUtc);
         }
@@ -43,22 +46,6 @@ namespace Moonglade.Data.Spec
                 .Include(p => p.Comment)
                 .Include(p => p.PostTag).ThenInclude(pt => pt.Tag)
                 .Include(p => p.PostCategory).ThenInclude(pc => pc.Category));
-        }
-
-        public PostSpec(int pageSize, int pageIndex, Guid? categoryId = null)
-            : base(p => !p.PostPublish.IsDeleted &&
-                        p.PostPublish.IsPublished &&
-                        (categoryId == null || p.PostCategory.Select(c => c.CategoryId).Contains(categoryId.Value)))
-        {
-            var startRow = (pageIndex - 1) * pageSize;
-
-            //AddInclude(post => post
-            //    .Include(p => p.PostPublish)
-            //    .Include(p => p.PostExtension)
-            //    .Include(p => p.PostTag)
-            //    .ThenInclude(pt => pt.Tag));
-            ApplyPaging(startRow, pageSize);
-            ApplyOrderByDescending(p => p.PostPublish.PubDateUtc);
         }
 
         public PostSpec(Guid id, bool includeRelatedData = true) : base(p => p.Id == id)
@@ -79,16 +66,16 @@ namespace Moonglade.Data.Spec
             switch (status)
             {
                 case PostPublishStatus.Draft:
-                    UseCriteria(p => !p.PostPublish.IsPublished && !p.PostPublish.IsDeleted);
+                    AddCriteria(p => !p.PostPublish.IsPublished && !p.PostPublish.IsDeleted);
                     break;
                 case PostPublishStatus.Published:
-                    UseCriteria(p => p.PostPublish.IsPublished && !p.PostPublish.IsDeleted);
+                    AddCriteria(p => p.PostPublish.IsPublished && !p.PostPublish.IsDeleted);
                     break;
                 case PostPublishStatus.Deleted:
-                    UseCriteria(p => p.PostPublish.IsDeleted);
+                    AddCriteria(p => p.PostPublish.IsDeleted);
                     break;
                 case PostPublishStatus.NotSet:
-                    UseCriteria(p => true);
+                    AddCriteria(p => true);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(status), status, null);

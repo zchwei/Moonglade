@@ -7,7 +7,6 @@ using Microsoft.Extensions.Logging;
 using Moonglade.Data.Entities;
 using Moonglade.Model;
 using Moonglade.Web.Models;
-using Newtonsoft.Json;
 
 namespace Moonglade.Web.Controllers
 {
@@ -61,9 +60,6 @@ namespace Moonglade.Web.Controllers
                         DisplayName = model.DisplayName
                     };
 
-                    var catJson = JsonConvert.SerializeObject(request);
-                    Logger.LogInformation($"Creating new category: {catJson}");
-
                     var response = _categoryService.CreateCategory(request);
                     if (response.IsSuccess)
                     {
@@ -88,7 +84,7 @@ namespace Moonglade.Web.Controllers
         }
 
         [Authorize]
-        [HttpGet("edit")]
+        [HttpGet("edit/{id:guid}")]
         public async Task<IActionResult> Edit(Guid id)
         {
             var r = await _categoryService.GetCategoryAsync(id);
@@ -99,7 +95,7 @@ namespace Moonglade.Web.Controllers
                     Id = r.Item.Id,
                     DisplayName = r.Item.DisplayName,
                     Name = r.Item.Name,
-                    Note = r.Item.Note,
+                    Note = r.Item.Note
                 };
 
                 return View("CreateOrEdit", model);
@@ -148,7 +144,7 @@ namespace Moonglade.Web.Controllers
         }
 
         [Authorize]
-        [HttpGet("delete")]
+        [HttpGet("delete/{id:guid}")]
         public async Task<IActionResult> Delete(Guid id)
         {
             var r = await _categoryService.GetCategoryAsync(id);
@@ -169,7 +165,7 @@ namespace Moonglade.Web.Controllers
         }
 
         [Authorize]
-        [HttpPost("delete")]
+        [HttpPost("delete/{id:guid}")]
         public IActionResult ConfirmDelete(Guid id)
         {
             try

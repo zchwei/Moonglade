@@ -18,17 +18,7 @@
     <div class="row">
         <div class="col-md-6">
             <div class="card">
-                <div class="card-header">Content</div>
-                <ul class="list-group list-group-flush">
-                    <li class="list-group-item">
-                        <label asp-for="UseFriendlyNotFoundImage" class="control-label"></label>
-                        <div class="material-switch float-right">
-                            <input @(Model.UseFriendlyNotFoundImage ? "checked=\"checked\"" : string.Empty) id="UseFriendlyNotFoundImage" name="UseFriendlyNotFoundImage" type="checkbox" value="true">
-                            <label for="UseFriendlyNotFoundImage" class="label-success"></label>
-                            <input name="UseFriendlyNotFoundImage" type="hidden" value="false">
-                        </div>
-                    </li>
-                </ul>
+                <div class="card-header">Comments</div>
                 <ul class="list-group list-group-flush">
                     <li class="list-group-item">
                         <label asp-for="EnableComments" class="control-label"></label>
@@ -38,8 +28,22 @@
                             <input name="EnableComments" type="hidden" value="false">
                         </div>
                     </li>
-                </ul>
-                <ul class="list-group list-group-flush">
+                    <li class="list-group-item">
+                        <label asp-for="RequireCommentReview" class="control-label"></label>
+                        <div class="material-switch float-right">
+                            <input @(Model.RequireCommentReview ? "checked=\"checked\"" : string.Empty) id="RequireCommentReview" name="RequireCommentReview" type="checkbox" value="true">
+                            <label for="RequireCommentReview" class="label-success"></label>
+                            <input name="RequireCommentReview" type="hidden" value="false">
+                        </div>
+                    </li>
+                    <li class="list-group-item">
+                        <label asp-for="EnableGravatar" class="control-label"></label>
+                        <div class="material-switch float-right">
+                            <input @(Model.EnableGravatar ? "checked=\"checked\"" : string.Empty) id="EnableGravatar" name="EnableGravatar" type="checkbox" value="true">
+                            <label for="EnableGravatar" class="label-success"></label>
+                            <input name="EnableGravatar" type="hidden" value="false">
+                        </div>
+                    </li>
                     <li class="list-group-item">
                         <label asp-for="EnableWordFilter" class="control-label"></label>
                         <div class="material-switch float-right">
@@ -49,13 +53,33 @@
                         </div>
                     </li>
                 </ul>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label asp-for="DisharmonyWords" class="control-label"></label>
+                        <textarea asp-for="DisharmonyWords" class="form-control h-300px"></textarea>
+                        <span asp-validation-for="DisharmonyWords" class="text-danger"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card mb-3">
+                <div class="card-header">Blog posts</div>
                 <ul class="list-group list-group-flush">
                     <li class="list-group-item">
-                        <label asp-for="EnableGravatar" class="control-label"></label>
+                        <label asp-for="UseFriendlyNotFoundImage" class="control-label"></label>
                         <div class="material-switch float-right">
-                            <input @(Model.EnableGravatar ? "checked=\"checked\"" : string.Empty) id="EnableGravatar" name="EnableGravatar" type="checkbox" value="true">
-                            <label for="EnableGravatar" class="label-success"></label>
-                            <input name="EnableGravatar" type="hidden" value="false">
+                            <input @(Model.UseFriendlyNotFoundImage ? "checked=\"checked\"" : string.Empty) id="UseFriendlyNotFoundImage" name="UseFriendlyNotFoundImage" type="checkbox" value="true">
+                            <label for="UseFriendlyNotFoundImage" class="label-success"></label>
+                            <input name="UseFriendlyNotFoundImage" type="hidden" value="false">
+                        </div>
+                    </li>
+                    <li class="list-group-item">
+                        <label asp-for="EnableImageLazyLoad" class="control-label"></label>
+                        <div class="material-switch float-right">
+                            <input @(Model.EnableImageLazyLoad ? "checked=\"checked\"" : string.Empty) id="EnableImageLazyLoad" name="EnableImageLazyLoad" type="checkbox" value="true">
+                            <label for="EnableImageLazyLoad" class="label-success"></label>
+                            <input name="EnableImageLazyLoad" type="hidden" value="false">
                         </div>
                     </li>
                 </ul>
@@ -70,10 +94,42 @@
                         <input asp-for="HotTagAmount" class="form-control" />
                         <span asp-validation-for="HotTagAmount" class="text-danger"></span>
                     </div>
+                </div>
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item">
+                        <label asp-for="ShowPostFooter" class="control-label"></label>
+                        <div class="material-switch float-right">
+                            <input @(Model.ShowPostFooter ? "checked=\"checked\"" : "") id="ShowPostFooter" name="ShowPostFooter" type="checkbox" value="true">
+                            <label for="ShowPostFooter" class="label-success"></label>
+                            <input name="ShowPostFooter" type="hidden" value="false">
+                        </div>
+                    </li>
+                </ul>
+                <div class="card-body">
                     <div class="form-group">
-                        <label asp-for="DisharmonyWords" class="control-label"></label>
-                        <textarea asp-for="DisharmonyWords" class="form-control h-300px"></textarea>
-                        <span asp-validation-for="DisharmonyWords" class="text-danger"></span>
+                        <label asp-for="PostFooterHtmlPitch" class="control-label"></label>
+                        <textarea asp-for="PostFooterHtmlPitch" class="form-control" style="font-size: 12px; font-family: 'Consolas'" spellcheck="false"></textarea>
+                        <span asp-validation-for="PostFooterHtmlPitch" class="text-danger"></span>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">Call-out</div>
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item">
+                        <label asp-for="ShowCalloutSection" class="control-label"></label>
+                        <div class="material-switch float-right">
+                            <input @(Model.ShowCalloutSection ? "checked=\"checked\"" : "") id="ShowCalloutSection" name="ShowCalloutSection" type="checkbox" value="true">
+                            <label for="ShowCalloutSection" class="label-success"></label>
+                            <input name="ShowCalloutSection" type="hidden" value="false">
+                        </div>
+                    </li>
+                </ul>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label asp-for="CalloutSectionHtmlPitch" class="control-label"></label>
+                        <textarea asp-for="CalloutSectionHtmlPitch" class="form-control" style="font-size: 12px; font-family: 'Consolas'" spellcheck="false"></textarea>
+                        <span asp-validation-for="CalloutSectionHtmlPitch" class="text-danger"></span>
                     </div>
                 </div>
             </div>

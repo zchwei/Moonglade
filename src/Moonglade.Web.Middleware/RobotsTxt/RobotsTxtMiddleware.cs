@@ -43,13 +43,13 @@ namespace Moonglade.Web.Middleware.RobotsTxt
         {
             var sb = _options.Build();
 
-            var output = sb.ToString()?.TrimEnd();
+            var output = sb.ToString().TrimEnd();
 
             if (string.IsNullOrWhiteSpace(output))
                 output = "# This file didn't get any instructions so everyone is allowed";
 
-            using (var sw = new StreamWriter(context.Response.Body))
-                await sw.WriteAsync(output);
+            await using var sw = new StreamWriter(context.Response.Body);
+            await sw.WriteAsync(output);
         }
     }
 }

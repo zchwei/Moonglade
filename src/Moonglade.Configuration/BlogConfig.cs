@@ -1,16 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Data.SqlClient;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Dapper;
-using Edi.Net.AesEncryption;
 using Edi.Practice.RequestResponseModel;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moonglade.Configuration.Abstraction;
 using Moonglade.Model;
-using Newtonsoft.Json;
 
 namespace Moonglade.Configuration
 {
@@ -19,8 +18,6 @@ namespace Moonglade.Configuration
         private readonly ILogger<BlogConfig> _logger;
 
         private readonly IConfiguration _configuration;
-
-        private readonly IAesEncryptionService _encryptionService;
 
         public BlogOwnerSettings BlogOwnerSettings { get; set; }
 
@@ -34,14 +31,16 @@ namespace Moonglade.Configuration
 
         public WatermarkSettings WatermarkSettings { get; set; }
 
+        public FriendLinksSettings FriendLinksSettings { get; set; }
+
+        public AdvancedSettings AdvancedSettings { get; set; }
+
         private bool _hasInitialized;
 
         public BlogConfig(
             ILogger<BlogConfig> logger,
-            IAesEncryptionService encryptionService,
             IConfiguration configuration)
         {
-            _encryptionService = encryptionService;
             _configuration = configuration;
             _logger = logger;
 
@@ -51,52 +50,50 @@ namespace Moonglade.Configuration
             EmailSettings = new EmailSettings();
             FeedSettings = new FeedSettings();
             WatermarkSettings = new WatermarkSettings();
+            FriendLinksSettings = new FriendLinksSettings();
+            AdvancedSettings = new AdvancedSettings();
 
             Initialize();
         }
 
         private void Initialize()
         {
-            if (!_hasInitialized)
-            {
-                var cfgDic = GetAllConfigurations();
+            if (_hasInitialized) return;
 
-                BlogOwnerSettings = JsonConvert.DeserializeObject<BlogOwnerSettings>(cfgDic[nameof(BlogOwnerSettings)]);
-                GeneralSettings = JsonConvert.DeserializeObject<GeneralSettings>(cfgDic[nameof(GeneralSettings)]);
-                ContentSettings = JsonConvert.DeserializeObject<ContentSettings>(cfgDic[nameof(ContentSettings)]);
+            var cfgDic = GetAllConfigurations();
 
-                EmailSettings = JsonConvert.DeserializeObject<EmailSettings>(cfgDic[nameof(EmailSettings)]);
-                if (!string.IsNullOrWhiteSpace(EmailSettings.SmtpPassword))
-                {
-                    EmailSettings.SmtpClearPassword = DecryptPassword(EmailSettings.SmtpPassword);
-                }
+            var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
-                FeedSettings = JsonConvert.DeserializeObject<FeedSettings>(cfgDic[nameof(FeedSettings)]);
-                WatermarkSettings = JsonConvert.DeserializeObject<WatermarkSettings>(cfgDic[nameof(WatermarkSettings)]);
+            BlogOwnerSettings = JsonSerializer.Deserialize<BlogOwnerSettings>(cfgDic[nameof(BlogOwnerSettings)], jsonOptions);
+            GeneralSettings = JsonSerializer.Deserialize<GeneralSettings>(cfgDic[nameof(GeneralSettings)], jsonOptions);
+            ContentSettings = JsonSerializer.Deserialize<ContentSettings>(cfgDic[nameof(ContentSettings)], jsonOptions);
+            EmailSettings = JsonSerializer.Deserialize<EmailSettings>(cfgDic[nameof(EmailSettings)], jsonOptions);
+            FeedSettings = JsonSerializer.Deserialize<FeedSettings>(cfgDic[nameof(FeedSettings)], jsonOptions);
+            WatermarkSettings = JsonSerializer.Deserialize<WatermarkSettings>(cfgDic[nameof(WatermarkSettings)], jsonOptions);
+            FriendLinksSettings = JsonSerializer.Deserialize<FriendLinksSettings>(cfgDic[nameof(FriendLinksSettings)], jsonOptions);
+            AdvancedSettings = JsonSerializer.Deserialize<AdvancedSettings>(cfgDic[nameof(AdvancedSettings)], jsonOptions);
 
-                _hasInitialized = true;
-            }
+            _hasInitialized = true;
         }
 
-        public async Task<Response> SaveConfigurationAsync<T>(T moongladeSettings) where T : IMoongladeSettings
+        public async Task<Response> SaveConfigurationAsync<T>(T moongladeSettings) where T : MoongladeSettings
         {
             async Task<int> SetConfiguration(string key, string value)
             {
                 var connStr = _configuration.GetConnectionString(Constants.DbConnectionName);
-                using (var conn = new SqlConnection(connStr))
-                {
-                    string sql = $"UPDATE {nameof(BlogConfiguration)} " +
-                                 $"SET {nameof(BlogConfiguration.CfgValue)} = @value, {nameof(BlogConfiguration.LastModifiedTimeUtc)} = @lastModifiedTimeUtc " +
-                                 $"WHERE {nameof(BlogConfiguration.CfgKey)} = @key";
+                await using var conn = new SqlConnection(connStr);
+                var sql = $"UPDATE {nameof(BlogConfiguration)} " +
+                          $"SET {nameof(BlogConfiguration.CfgValue)} = @value, " +
+                          $"{nameof(BlogConfiguration.LastModifiedTimeUtc)} = @lastModifiedTimeUtc " +
+                          $"WHERE {nameof(BlogConfiguration.CfgKey)} = @key";
 
-                    return await conn.ExecuteAsync(sql, new { key, value, lastModifiedTimeUtc = DateTime.UtcNow });
-                }
+                return await conn.ExecuteAsync(sql, new { key, value, lastModifiedTimeUtc = DateTime.UtcNow });
             }
 
             try
             {
-                var json = moongladeSettings.GetJson();
-                int rows = await SetConfiguration(typeof(T).Name, json);
+                var json = JsonSerializer.Serialize(moongladeSettings);
+                var rows = await SetConfiguration(typeof(T).Name, json);
                 return new Response(rows > 0);
             }
             catch (Exception e)
@@ -106,21 +103,9 @@ namespace Moonglade.Configuration
             }
         }
 
-        public string EncryptPassword(string clearPassword)
-        {
-            var str = _encryptionService.Encrypt(clearPassword);
-            return str;
-        }
-
         public void RequireRefresh()
         {
             _hasInitialized = false;
-        }
-
-        private string DecryptPassword(string encryptedPassword)
-        {
-            var str = _encryptionService.Decrypt(encryptedPassword);
-            return str;
         }
 
         private IDictionary<string, string> GetAllConfigurations()
@@ -128,13 +113,14 @@ namespace Moonglade.Configuration
             try
             {
                 var connStr = _configuration.GetConnectionString(Constants.DbConnectionName);
-                using (var conn = new SqlConnection(connStr))
-                {
-                    string sql = $"SELECT CfgKey, CfgValue FROM {nameof(BlogConfiguration)}";
-                    var data = conn.Query<(string CfgKey, string CfgValue)>(sql);
-                    var dic = data.ToDictionary(c => c.CfgKey, c => c.CfgValue);
-                    return dic;
-                }
+                using var conn = new SqlConnection(connStr);
+                var sql = $"SELECT {nameof(BlogConfiguration.CfgKey)}, " +
+                          $"{nameof(BlogConfiguration.CfgValue)} " +
+                          $"FROM {nameof(BlogConfiguration)}";
+
+                var data = conn.Query<(string CfgKey, string CfgValue)>(sql);
+                var dic = data.ToDictionary(c => c.CfgKey, c => c.CfgValue);
+                return dic;
             }
             catch (Exception e)
             {
